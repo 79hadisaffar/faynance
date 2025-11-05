@@ -1,0 +1,60 @@
+// Gradle init script to add mirror repositories for plugin management and project dependencies
+// Usage: gradlew -I maven-mirrors.gradle <task>
+
+settingsEvaluated { settings ->
+    try {
+        settings.pluginManagement { pm ->
+            pm.repositories { repos ->
+                // Fast mirrors (China mainland)
+                repos.maven { it.setUrl("https://maven.aliyun.com/repository/google") }
+                repos.maven { it.setUrl("https://maven.aliyun.com/repository/gradle-plugin") }
+                repos.maven { it.setUrl("https://maven.aliyun.com/repository/public") }
+                // Tencent & Huawei mirrors
+                repos.maven { it.setUrl("https://mirrors.cloud.tencent.com/repository/maven/google") }
+                repos.maven { it.setUrl("https://repo.huaweicloud.com/repository/maven/google") }
+                // Public fallbacks
+                repos.mavenCentral()
+                repos.maven { it.setUrl("https://jitpack.io") }
+                repos.maven { it.setUrl("https://repo1.maven.org/maven2") }
+                // Keep google() last if reachable
+                try { repos.google() } catch (Throwable ignored) {}
+            }
+        }
+    } catch (Throwable ignored) {
+        // Older Gradle may not support pluginManagement tweaks here
+    }
+}
+
+gradle.settingsEvaluated { s ->
+    // For projects using dependencyResolutionManagement in settings.gradle
+    try {
+        def drm = s.getClass().methods.find { it.name == 'getDependencyResolutionManagement' }
+        if (drm != null) {
+            s.dependencyResolutionManagement { drmCfg ->
+                drmCfg.repositories { repos ->
+                    repos.maven { it.setUrl("https://maven.aliyun.com/repository/google") }
+                    repos.maven { it.setUrl("https://maven.aliyun.com/repository/public") }
+                    repos.maven { it.setUrl("https://mirrors.cloud.tencent.com/repository/maven/google") }
+                    repos.maven { it.setUrl("https://repo.huaweicloud.com/repository/maven/google") }
+                    repos.mavenCentral()
+                    repos.maven { it.setUrl("https://jitpack.io") }
+                    repos.maven { it.setUrl("https://repo1.maven.org/maven2") }
+                    try { repos.google() } catch (Throwable ignored) {}
+                }
+            }
+        }
+    } catch (Throwable ignored) {}
+}
+
+allprojects { p ->
+    p.repositories { repos ->
+        repos.maven { it.setUrl("https://maven.aliyun.com/repository/google") }
+        repos.maven { it.setUrl("https://maven.aliyun.com/repository/public") }
+        repos.maven { it.setUrl("https://mirrors.cloud.tencent.com/repository/maven/google") }
+        repos.maven { it.setUrl("https://repo.huaweicloud.com/repository/maven/google") }
+        repos.mavenCentral()
+        repos.maven { it.setUrl("https://jitpack.io") }
+        repos.maven { it.setUrl("https://repo1.maven.org/maven2") }
+        try { repos.google() } catch (Throwable ignored) {}
+    }
+}

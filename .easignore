@@ -1,0 +1,27 @@
+# Exclude local/Windows-specific files to avoid EAS upload errors
+# Root-level
+node_modules/
+portable-jdk/
+jdk17/
+jdk*.zip
+temurin*.zip
+*.log
+.DS_Store
+Thumbs.db
+
+# Android build caches and local config
+android/.gradle/
+android/.cxx/
+android/.idea/
+android/local.properties
+android/app/build/
+
+# Any embedded JDK artifacts (avoid packing huge binaries)
+**/jdk*/
+**/*.jmod
+
+# Expo/EAS artifacts
+.dist/
+.expo/
+.expo-shared/
+.expo/**

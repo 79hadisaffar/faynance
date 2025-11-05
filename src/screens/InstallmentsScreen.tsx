@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, FlatList, StyleSheet, Alert, RefreshControl, AppState } from 'react-native';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, Checkbox, List } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Installment } from '../models/types';
@@ -7,6 +8,7 @@ import { formatPersianDate, formatCurrency, generateMonthlySchedule, jDayFromISO
 import PersianDatePicker from '../components/PersianDatePicker';
 import NotificationService from '../services/notifications';
 import { useSettings } from '../theme';
+import AmountInput from '../components/AmountInput';
 
 export default function InstallmentsScreen() {
   const [installments, setInstallments] = useState<Installment[]>([]);
@@ -19,11 +21,47 @@ export default function InstallmentsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
-  const [monthlyText, setMonthlyText] = useState('');
+  // ورودی مبلغ ماهانه با AmountInput قالب‌بندی می‌شود
 
   useEffect(() => {
     loadInstallments();
   }, []);
+
+  // ذخیرهٔ خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && visible) {
+        const title = (currentInstallment.title || '').trim();
+        const count = currentInstallment.installmentCount || 0;
+        const monthly = currentInstallment.installmentAmount || 0;
+        if (title && monthly > 0 && count > 0) {
+          saveInstallment({ silent: true });
+        } else {
+          setVisible(false);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [visible, currentInstallment]);
+
+  // ذخیرهٔ خودکار در تعویض تب/خروج از صفحه
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (visible) {
+          const title = (currentInstallment.title || '').trim();
+          const count = currentInstallment.installmentCount || 0;
+          const monthly = currentInstallment.installmentAmount || 0;
+          if (title && monthly > 0 && count > 0) {
+            // silent save
+            saveInstallment({ silent: true });
+          } else {
+            setVisible(false);
+          }
+        }
+      };
+    }, [visible, currentInstallment])
+  );
 
   const loadInstallments = async () => {
     const data = await DatabaseService.getInstallments();
@@ -40,28 +78,41 @@ export default function InstallmentsScreen() {
     if (installment) {
       setCurrentInstallment(installment);
       setEditMode(true);
-      setMonthlyText((installment.installmentAmount || 0).toLocaleString('fa-IR'));
+      
     } else {
       setCurrentInstallment({
         title: '',
         totalAmount: 0,
-        installmentCount: 12,
+        // پیش‌فرض تعداد اقساط خالی باشد تا کاربر مشخص کند
+        installmentCount: undefined as any,
         paidCount: 0,
         installmentAmount: 0,
         startDate: new Date().toISOString(),
-        dueDay: 1,
+        // dueDay از روی تاریخ شروع محاسبه می‌شود
+        // dueDay: 1,
         description: '',
         isPaid: false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
       setEditMode(false);
-      setMonthlyText('');
+      
     }
     setVisible(true);
   };
 
   const hideModal = () => setVisible(false);
+  // روی دکمه بازگشت/بستن مودال، در صورت کامل بودن اطلاعات، خودکار ذخیره می‌کنیم
+  const handleDismiss = async () => {
+    const title = (currentInstallment.title || '').trim();
+    const count = currentInstallment.installmentCount || 0;
+    const monthly = currentInstallment.installmentAmount || 0;
+    if (title && monthly > 0 && count > 0) {
+      await saveInstallment({ silent: true });
+    } else {
+      hideModal();
+    }
+  };
 
   const openPayments = async (installment: Installment) => {
     const rows = await DatabaseService.getInstallmentPayments(installment.id!);
@@ -80,12 +131,14 @@ export default function InstallmentsScreen() {
     loadInstallments();
   };
 
-  const saveInstallment = async () => {
+  const saveInstallment = async (opts?: { silent?: boolean }) => {
     const title = (currentInstallment.title || '').trim();
     const count = currentInstallment.installmentCount || 0;
     const monthly = currentInstallment.installmentAmount || 0;
     if (!title || monthly <= 0 || count <= 0) {
-      Alert.alert('خطا', 'عنوان، مبلغ ماهانه و تعداد اقساط را کامل وارد کنید');
+      if (!opts?.silent) {
+        Alert.alert('خطا', 'عنوان، مبلغ ماهانه و تعداد اقساط را کامل وارد کنید');
+      }
       return;
     }
 
@@ -128,7 +181,7 @@ export default function InstallmentsScreen() {
       hideModal();
       loadInstallments();
     } catch (error) {
-      Alert.alert('خطا', 'خطا در ذخیره اطلاعات');
+      if (!opts?.silent) Alert.alert('خطا', 'خطا در ذخیره اطلاعات');
     }
   };
 
@@ -198,7 +251,7 @@ export default function InstallmentsScreen() {
       />
       
       <Portal>
-        <Modal visible={visible} onDismiss={hideModal} contentContainerStyle={styles.modal}>
+  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش قسط' : 'افزودن قسط'}</Title>
           <TextInput
             label="عنوان"
@@ -207,25 +260,17 @@ export default function InstallmentsScreen() {
             style={styles.input}
           />
           {/* فقط حالت مبلغ ماهانه */}
-          <TextInput
-            label="مبلغ ماهانه"
-            value={monthlyText}
-            onChangeText={(text) => {
-              const monthly = parseInt(toEnglishDigits(text).replace(/[^0-9]/g,'') || '0', 10);
-              const count = currentInstallment.installmentCount || 0;
-              setCurrentInstallment({
-                ...currentInstallment,
-                installmentAmount: monthly,
-                totalAmount: monthly * count,
-              });
-              setMonthlyText(monthly ? monthly.toLocaleString('fa-IR') : '');
-            }}
-            keyboardType="number-pad"
-            style={styles.input}
-          />
+          <AmountInput label="مبلغ ماهانه" value={currentInstallment.installmentAmount || 0} onChange={(monthly)=>{
+            const count = currentInstallment.installmentCount || 0;
+            setCurrentInstallment({
+              ...currentInstallment,
+              installmentAmount: monthly,
+              totalAmount: monthly * count,
+            });
+          }} style={styles.input} />
           <TextInput
             label="تعداد اقساط"
-            value={(currentInstallment.installmentCount ?? 0).toString()}
+            value={currentInstallment.installmentCount ? String(currentInstallment.installmentCount) : ''}
             onChangeText={(text) => {
               const count = parseInt(toEnglishDigits(text).replace(/[^0-9]/g,'') || '0', 10);
               const monthly = currentInstallment.installmentAmount || 0;
@@ -280,7 +325,7 @@ export default function InstallmentsScreen() {
           <List.Item title="یادآوری" description="یادآوری قسط بعدی"/>
           <View style={styles.modalButtons}>
             <Button onPress={hideModal}>انصراف</Button>
-            <Button mode="contained" onPress={saveInstallment}>ذخیره</Button>
+            <Button mode="contained" onPress={() => saveInstallment()}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>

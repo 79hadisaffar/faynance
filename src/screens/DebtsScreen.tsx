@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -10,6 +11,7 @@ import NotificationService from '../services/notifications';
 import moment from 'moment-jalaali';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSettings } from '../theme';
+import AmountInput from '../components/AmountInput';
 
 export default function DebtsScreen() {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -20,7 +22,7 @@ export default function DebtsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
-  const [amountText, setAmountText] = useState('');
+  // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [next30, setNext30] = useState(false);
 
@@ -30,6 +32,37 @@ export default function DebtsScreen() {
     }
     loadDebts();
   }, []);
+
+  // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && visible) {
+        const valid = !!(currentDebt.personName && (currentDebt.amount || 0) > 0);
+        if (valid) {
+          saveDebt();
+        } else {
+          setVisible(false);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [visible, currentDebt]);
+
+  // ذخیرهٔ خودکار هنگام تعویض تب/blur
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (visible) {
+          const valid = !!(currentDebt.personName && (currentDebt.amount || 0) > 0);
+          if (valid) {
+            saveDebt();
+          } else {
+            setVisible(false);
+          }
+        }
+      };
+    }, [visible, currentDebt])
+  );
 
   const loadDebts = async () => {
     const data = await DatabaseService.getDebts();
@@ -82,7 +115,6 @@ export default function DebtsScreen() {
     if (debt) {
       setCurrentDebt(debt);
       setEditMode(true);
-      setAmountText((debt.amount || 0).toLocaleString('fa-IR'));
     } else {
       setCurrentDebt({
         personName: '',
@@ -95,12 +127,19 @@ export default function DebtsScreen() {
         updatedAt: new Date().toISOString(),
       });
       setEditMode(false);
-      setAmountText('');
     }
     setVisible(true);
   };
 
   const hideModal = () => setVisible(false);
+  const handleDismiss = async () => {
+    const valid = !!(currentDebt.personName && (currentDebt.amount || 0) > 0);
+    if (valid) {
+      await saveDebt();
+    } else {
+      hideModal();
+    }
+  };
 
   const saveDebt = async () => {
     if (!currentDebt.personName || !currentDebt.amount) return;
@@ -228,15 +267,10 @@ export default function DebtsScreen() {
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
       <Portal>
-        <Modal visible={visible} onDismiss={hideModal} contentContainerStyle={styles.modal}>
+  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش بدهی' : 'ثبت بدهی'}</Title>
           <TextInput label="نام شخص" value={currentDebt.personName} onChangeText={(t)=>setCurrentDebt({...currentDebt, personName:t})} style={styles.input} />
-          <TextInput label="مبلغ" value={amountText} keyboardType="numeric" onChangeText={(t)=>{
-            const en = toEnglishDigits(t);
-            const val = parseInt(en.replace(/[^0-9]/g,'')||'0',10);
-            setCurrentDebt({...currentDebt, amount: val});
-            setAmountText(val ? val.toLocaleString('fa-IR') : '');
-          }} style={styles.input} />
+          <AmountInput label="مبلغ" value={currentDebt.amount || 0} onChange={(v)=> setCurrentDebt({ ...currentDebt, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(currentDebt.amount || 0)}</Paragraph>
           <List.Item title="تاریخ سررسید" description={formatPersianDate(currentDebt.dueDate || new Date())} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>

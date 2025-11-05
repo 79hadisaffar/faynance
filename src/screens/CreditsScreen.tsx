@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -10,6 +11,7 @@ import NotificationService from '../services/notifications';
 import { useSettings } from '../theme';
 import moment from 'moment-jalaali';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AmountInput from '../components/AmountInput';
 
 export default function CreditsScreen() {
   const [credits, setCredits] = useState<Credit[]>([]);
@@ -20,7 +22,7 @@ export default function CreditsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
-  const [amountText, setAmountText] = useState('');
+  // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [next30, setNext30] = useState(false);
 
@@ -30,6 +32,37 @@ export default function CreditsScreen() {
     }
     loadCredits();
   }, []);
+
+  // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && visible) {
+        const valid = !!(currentCredit.personName && (currentCredit.amount || 0) > 0);
+        if (valid) {
+          saveCredit();
+        } else {
+          setVisible(false);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [visible, currentCredit]);
+
+  // ذخیرهٔ خودکار هنگام تعویض تب/blur
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (visible) {
+          const valid = !!(currentCredit.personName && (currentCredit.amount || 0) > 0);
+          if (valid) {
+            saveCredit();
+          } else {
+            setVisible(false);
+          }
+        }
+      };
+    }, [visible, currentCredit])
+  );
 
   const loadCredits = async () => {
     const data = await DatabaseService.getCredits();
@@ -81,7 +114,6 @@ export default function CreditsScreen() {
     if (credit) {
       setCurrentCredit(credit);
       setEditMode(true);
-      setAmountText((credit.amount || 0).toLocaleString('fa-IR'));
     } else {
       setCurrentCredit({
         personName: '',
@@ -94,12 +126,19 @@ export default function CreditsScreen() {
         updatedAt: new Date().toISOString(),
       });
       setEditMode(false);
-      setAmountText('');
     }
     setVisible(true);
   };
 
   const hideModal = () => setVisible(false);
+  const handleDismiss = async () => {
+    const valid = !!(currentCredit.personName && (currentCredit.amount || 0) > 0);
+    if (valid) {
+      await saveCredit();
+    } else {
+      hideModal();
+    }
+  };
 
   const saveCredit = async () => {
     if (!currentCredit.personName || !currentCredit.amount) return;
@@ -224,15 +263,10 @@ export default function CreditsScreen() {
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
       <Portal>
-        <Modal visible={visible} onDismiss={hideModal} contentContainerStyle={styles.modal}>
+  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش طلب' : 'ثبت طلب'}</Title>
           <TextInput label="نام شخص" value={currentCredit.personName} onChangeText={(t)=>setCurrentCredit({...currentCredit, personName:t})} style={styles.input} />
-          <TextInput label="مبلغ" value={amountText} keyboardType="numeric" onChangeText={(t)=>{
-            const en = toEnglishDigits(t);
-            const val = parseInt(en.replace(/[^0-9]/g,'')||'0',10);
-            setCurrentCredit({...currentCredit, amount: val});
-            setAmountText(val ? val.toLocaleString('fa-IR') : '');
-          }} style={styles.input} />
+          <AmountInput label="مبلغ" value={currentCredit.amount || 0} onChange={(v)=> setCurrentCredit({ ...currentCredit, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(currentCredit.amount || 0)}</Paragraph>
           <List.Item title="تاریخ سررسید" description={formatPersianDate(currentCredit.dueDate || new Date())} />
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>

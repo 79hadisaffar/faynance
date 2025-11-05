@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, SectionList, Pressable, StyleSheet, Alert, RefreshControl, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, SectionList, Pressable, StyleSheet, Alert, RefreshControl, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, IconButton, Portal, Modal, TextInput, Button, List, Chip } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -11,6 +12,7 @@ import NotificationService from '../services/notifications';
 import moment from 'moment-jalaali';
 import { useSettings } from '../theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AmountInput from '../components/AmountInput';
 
 export default function ExpensesScreen() {
   const [items, setItems] = useState<Expense[]>([]);
@@ -20,7 +22,7 @@ export default function ExpensesScreen() {
   const [current, setCurrent] = useState<Partial<Expense>>({});
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
-  const [amountText, setAmountText] = useState('');
+  // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
 
   const load = async () => {
     const data = await DatabaseService.getExpenses();
@@ -34,6 +36,37 @@ export default function ExpensesScreen() {
     }
     load();
   }, []);
+
+  // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && visible) {
+        const valid = !!((current.title || '').trim() && (current.amount || 0) > 0);
+        if (valid) {
+          save({ silent: true });
+        } else {
+          setVisible(false);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [visible, current]);
+
+  // ذخیره خودکار هنگام تعویض تب/blur
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (visible) {
+          const valid = !!((current.title || '').trim() && (current.amount || 0) > 0);
+          if (valid) {
+            save({ silent: true });
+          } else {
+            setVisible(false);
+          }
+        }
+      };
+    }, [visible, current])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -51,12 +84,12 @@ export default function ExpensesScreen() {
       });
       setEditMode(false);
     }
-    setAmountText(exp ? (exp.amount || 0).toLocaleString('fa-IR') : '');
+  // مقدار اولیه AmountInput از فیلد amount خوانده می‌شود
     setVisible(true);
   };
 
-  const save = async () => {
-    if (!current.title || !current.amount) { Alert.alert('خطا','عنوان و مبلغ الزامی است'); return; }
+  const save = async (opts?: { silent?: boolean }) => {
+    if (!current.title || !current.amount) { if (!opts?.silent) Alert.alert('خطا','عنوان و مبلغ الزامی است'); return; }
     if (editMode && current.id) {
       await DatabaseService.updateExpense(current.id, { ...current, updatedAt: new Date().toISOString() });
     } else {
@@ -171,15 +204,10 @@ export default function ExpensesScreen() {
       />)}
 
       <Portal>
-        <Modal visible={visible} onDismiss={()=>setVisible(false)} contentContainerStyle={styles.modal}>
+  <Modal visible={visible} onDismiss={async ()=>{ if ((current.title||'').trim() && (current.amount||0)>0) { await save({ silent: true }); } else { setVisible(false); } }} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش مخارج' : 'ثبت مخارج'}</Title>
           <TextInput label="عنوان" value={current.title} onChangeText={(t)=>setCurrent({...current, title:t})} style={styles.input} />
-          <TextInput label="مبلغ" value={amountText} keyboardType="numeric" onChangeText={(t)=>{
-            const en = toEnglishDigits(t);
-            const val = parseInt(en.replace(/[^0-9]/g,'')||'0',10);
-            setCurrent({...current, amount: val});
-            setAmountText(val ? val.toLocaleString('fa-IR') : '');
-          }} style={styles.input} />
+          <AmountInput label="مبلغ" value={current.amount || 0} onChange={(v)=> setCurrent({ ...current, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(current.amount || 0)}</Paragraph>
           <List.Item title="تاریخ" description={formatPersianDate(current.dueDate || new Date())} left={(p)=>null} />
           <PersianDatePicker
@@ -204,7 +232,7 @@ export default function ExpensesScreen() {
           </View>
           <View style={styles.modalButtons}>
             <Button onPress={()=>setVisible(false)}>انصراف</Button>
-            <Button mode="contained" onPress={save}>ذخیره</Button>
+            <Button mode="contained" onPress={() => save()}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>

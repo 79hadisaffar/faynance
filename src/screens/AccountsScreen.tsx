@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { FlatList, View, AppState } from 'react-native';
 import { Appbar, Button, Card, Dialog, List, Portal, Text, TextInput } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Account } from '../models/types';
 import { formatCurrency, parseSmsBalances } from '../utils/helpers';
+import AmountInput from '../components/AmountInput';
 
 export default function AccountsScreen() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -16,6 +18,8 @@ export default function AccountsScreen() {
     if (rows) setAccounts(rows);
   };
   useEffect(() => { load(); }, []);
+
+  
 
   const total = accounts.reduce((s, a) => s + (a.balance || 0), 0);
 
@@ -67,6 +71,35 @@ export default function AccountsScreen() {
     await load();
   };
 
+  // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && edit) {
+        if ((edit.title || '').trim()) {
+          saveEdit();
+        } else {
+          setEdit(null);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [edit]);
+
+  // ذخیره خودکار هنگام تعویض تب/blur
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (edit) {
+          if ((edit.title || '').trim()) {
+            saveEdit();
+          } else {
+            setEdit(null);
+          }
+        }
+      };
+    }, [edit])
+  );
+
   const renderItem = ({ item }: { item: Account }) => (
     <Card style={{ margin: 12 }} onPress={() => setEdit(item)}>
       <Card.Title title={item.title} subtitle={item.cardLast4 ? `****${item.cardLast4}` : ''} right={() => <Text style={{ margin: 12 }}>{formatCurrency(item.balance || 0)}</Text>} />
@@ -109,14 +142,14 @@ export default function AccountsScreen() {
             <Button mode="contained" disabled={parsed.length === 0} onPress={applyParsed}>اعمال</Button>
           </Dialog.Actions>
         </Dialog>
-        <Dialog visible={!!edit} onDismiss={() => setEdit(null)}>
+  <Dialog visible={!!edit} onDismiss={async () => { if (edit && (edit.title || '').trim()) { await saveEdit(); } else { setEdit(null); } }}>
           <Dialog.Title>ویرایش حساب</Dialog.Title>
           {edit && (
             <Dialog.Content>
               <TextInput style={{ marginBottom: 8 }} label="نام" value={edit.title} onChangeText={(t)=>setEdit({ ...edit, title: t })} />
               <TextInput style={{ marginBottom: 8 }} label="بانک" value={edit.bankName || ''} onChangeText={(t)=>setEdit({ ...edit, bankName: t })} />
               <TextInput style={{ marginBottom: 8 }} label="چهار رقم آخر" value={edit.cardLast4 || ''} onChangeText={(t)=>setEdit({ ...edit, cardLast4: t.replace(/[^0-9]/g,'').slice(-4) })} keyboardType="number-pad" />
-              <TextInput style={{ marginBottom: 8 }} label="موجودی" value={String(edit.balance ?? 0)} onChangeText={(t)=>setEdit({ ...edit, balance: parseInt(t.replace(/[^0-9]/g,'')||'0') })} keyboardType="number-pad" />
+              <AmountInput label="موجودی" value={edit.balance ?? 0} onChange={(v)=> setEdit({ ...edit, balance: v })} style={{ marginBottom: 8 }} />
             </Dialog.Content>
           )}
           <Dialog.Actions>

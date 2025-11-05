@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -10,6 +11,7 @@ import NotificationService from '../services/notifications';
 import { useSettings } from '../theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import moment from 'moment-jalaali';
+import AmountInput from '../components/AmountInput';
 
 export default function ChecksScreen() {
   const [checks, setChecks] = useState<Check[]>([]);
@@ -20,7 +22,7 @@ export default function ChecksScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
-  const [amountText, setAmountText] = useState('');
+  // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
 
   useEffect(() => {
     if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -28,6 +30,37 @@ export default function ChecksScreen() {
     }
     loadChecks();
   }, []);
+
+  // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && visible) {
+        const valid = !!(currentCheck.checkNumber && currentCheck.bankName && (currentCheck.amount || 0) > 0);
+        if (valid) {
+          saveCheck();
+        } else {
+          setVisible(false);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [visible, currentCheck]);
+
+  // ذخیرهٔ خودکار هنگام تعویض تب/blur
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (visible) {
+          const valid = !!(currentCheck.checkNumber && currentCheck.bankName && (currentCheck.amount || 0) > 0);
+          if (valid) {
+            saveCheck();
+          } else {
+            setVisible(false);
+          }
+        }
+      };
+    }, [visible, currentCheck])
+  );
 
   const loadChecks = async () => {
     const data = await DatabaseService.getChecks();
@@ -51,11 +84,19 @@ export default function ChecksScreen() {
       } as Partial<Check>);
       setEditMode(false);
     }
-    setAmountText(check ? (check.amount || 0).toLocaleString('fa-IR') : '');
+  // مقدار اولیه AmountInput از فیلد amount خوانده می‌شود
     setVisible(true);
   };
 
   const hideModal = () => setVisible(false);
+  const handleDismiss = async () => {
+    const valid = !!(currentCheck.checkNumber && currentCheck.bankName && (currentCheck.amount || 0) > 0);
+    if (valid) {
+      await saveCheck();
+    } else {
+      hideModal();
+    }
+  };
 
   const saveCheck = async () => {
     if (!currentCheck.checkNumber || !currentCheck.amount || !currentCheck.bankName) return;
@@ -183,15 +224,10 @@ export default function ChecksScreen() {
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
       <Portal>
-        <Modal visible={visible} onDismiss={hideModal} contentContainerStyle={styles.modal}>
+  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش چک' : 'ثبت چک'}</Title>
           <TextInput label="شماره چک" value={currentCheck.checkNumber} onChangeText={(t)=>setCurrentCheck({...currentCheck, checkNumber:t})} style={styles.input} />
-          <TextInput label="مبلغ" value={amountText} keyboardType="numeric" onChangeText={(t)=>{
-            const en = toEnglishDigits(t);
-            const val = parseInt(en.replace(/[^0-9]/g,'')||'0',10);
-            setCurrentCheck({...currentCheck, amount: val});
-            setAmountText(val ? val.toLocaleString('fa-IR') : '');
-          }} style={styles.input} />
+          <AmountInput label="مبلغ" value={currentCheck.amount || 0} onChange={(v)=> setCurrentCheck({ ...currentCheck, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(currentCheck.amount || 0)}</Paragraph>
           <TextInput label="بانک" value={currentCheck.bankName} onChangeText={(t)=>setCurrentCheck({...currentCheck, bankName:t})} style={styles.input} />
           <List.Item title="تاریخ سررسید" description={formatPersianDate(currentCheck.dueDate || new Date())} />

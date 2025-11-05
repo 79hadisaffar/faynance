@@ -1,4 +1,4 @@
-name: Android Debug APK
+name: Android Release APK
 
 on:
   workflow_dispatch:
@@ -39,17 +39,17 @@ jobs:
         run: |
           npm ci
 
-      - name: Prebuild Android
+      - name: Prebuild Android (idempotent)
         run: |
           npx expo prebuild --platform android --non-interactive
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: app-release.apk
+          path: android/app/build/outputs/apk/release/app-release.apk

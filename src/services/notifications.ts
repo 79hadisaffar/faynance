@@ -21,12 +21,19 @@ class NotificationService {
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#FF231F7C',
       });
+      await Notifications.setNotificationChannelAsync('reminders', {
+        name: 'reminders',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 200, 200, 200],
+        lightColor: '#FFA000',
+        sound: 'default',
+      });
     }
 
     // درخواست مجوز
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
-      console.warn('⚠️ Notification permission not granted');
+  console.warn('⚠️ اجازه‌ی اعلان‌ها داده نشده است');
     }
   }
 
@@ -34,7 +41,8 @@ class NotificationService {
     title: string,
     body: string,
     date: Date,
-    data?: any
+    data?: any,
+    channelId: 'default' | 'reminders' = 'default'
   ): Promise<string> {
     const identifier = await Notifications.scheduleNotificationAsync({
       content: {
@@ -46,6 +54,8 @@ class NotificationService {
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date,
+        // روی اندروید، کانال نوتیفیکیشن را تعیین می‌کند
+        channelId,
       },
     });
 
@@ -70,7 +80,9 @@ class NotificationService {
     return this.scheduleNotification(
       `یادآوری: ${title}`,
       message,
-      reminderDate
+      reminderDate,
+      undefined,
+      'reminders'
     );
   }
 

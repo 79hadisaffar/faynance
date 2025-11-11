@@ -64,7 +64,7 @@ const SettingsContext = createContext<SettingsState | undefined>(undefined);
 
 export function useSettings() {
   const ctx = useContext(SettingsContext);
-  if (!ctx) throw new Error('useSettings must be used within ThemeProvider');
+  if (!ctx) throw new Error('useSettings باید داخل ThemeProvider استفاده شود');
   return ctx;
 }
 

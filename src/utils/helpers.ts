@@ -13,7 +13,7 @@ export const formatPersianDateTime = (date: Date | string): string => {
 
 export const parsePersianDate = (persianDate: string): Date => {
   const parts = persianDate.split('/');
-  if (parts.length !== 3) throw new Error('Invalid Persian date format');
+  if (parts.length !== 3) throw new Error('فرمت تاریخ فارسی نامعتبر است');
   
   const jy = parseInt(parts[0]);
   const jm = parseInt(parts[1]);
@@ -65,6 +65,13 @@ export const formatCurrency = (amount: number): string => {
 export const isOverdue = (dueDate: Date): boolean => {
   return new Date() > dueDate;
 };
+
+// آیا تاریخِ ورودی در ماه جلالی جاری است؟
+export function isInCurrentJMonth(iso: string | Date): boolean {
+  const m = jalaali(iso);
+  const now = jalaali();
+  return m.jYear() === now.jYear() && m.jMonth() === now.jMonth();
+}
 
 // Group array of items into last N Jalali months and sum amounts
 export function groupAmountsByJMonth<T>(items: T[], getDateISO: (t: T)=>string, getAmount: (t: T)=>number, monthsBack = 6) {

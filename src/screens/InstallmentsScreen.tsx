@@ -191,7 +191,7 @@ export default function InstallmentsScreen() {
       hideModal();
       await loadInstallments();
     } catch (error: any) {
-      console.error('saveInstallment error:', error);
+      console.error('خطا در ذخیره اقساط:', error);
       if (!opts?.silent) Alert.alert('خطا در ذخیره', error?.message ? String(error.message) : String(error));
     }
     finally {
@@ -221,7 +221,7 @@ export default function InstallmentsScreen() {
               setSnack({ visible: false, message: '' });
             }});
             const t = setTimeout(async () => {
-              try { await DatabaseService.deleteInstallment(id); } catch (e) { console.error('deleteInstallment failed', e); }
+              try { await DatabaseService.deleteInstallment(id); } catch (e) { console.error('خطا در حذف قسط', e); }
               pendingDeletes.current.delete(id);
               setSnack({ visible: false, message: '' });
             }, 6000);

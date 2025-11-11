@@ -266,6 +266,7 @@ export default function CreditsScreen() {
   <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش طلب' : 'ثبت طلب'}</Title>
           <TextInput label="نام شخص" value={currentCredit.personName} onChangeText={(t)=>setCurrentCredit({...currentCredit, personName:t})} style={styles.input} />
+          <TextInput label="تلفن" value={currentCredit.phone} onChangeText={(t)=>setCurrentCredit({...currentCredit, phone:t})} style={styles.input} keyboardType="phone-pad" />
           <AmountInput label="مبلغ" value={currentCredit.amount || 0} onChange={(v)=> setCurrentCredit({ ...currentCredit, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(currentCredit.amount || 0)}</Paragraph>
           <List.Item title="تاریخ سررسید" description={formatPersianDate(currentCredit.dueDate || new Date())} />

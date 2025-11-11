@@ -28,6 +28,7 @@ export interface Debt {
   id?: number;
   personName: string;
   amount: number;
+  phone?: string;
   description: string;
   dueDate: string;
   isPaid: boolean;
@@ -40,6 +41,7 @@ export interface Credit {
   id?: number;
   personName: string;
   amount: number;
+  phone?: string;
   description: string;
   dueDate: string;
   isReceived: boolean;

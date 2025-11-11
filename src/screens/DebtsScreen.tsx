@@ -270,6 +270,7 @@ export default function DebtsScreen() {
   <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش بدهی' : 'ثبت بدهی'}</Title>
           <TextInput label="نام شخص" value={currentDebt.personName} onChangeText={(t)=>setCurrentDebt({...currentDebt, personName:t})} style={styles.input} />
+          <TextInput label="تلفن" value={currentDebt.phone} onChangeText={(t)=>setCurrentDebt({...currentDebt, phone:t})} style={styles.input} keyboardType="phone-pad" />
           <AmountInput label="مبلغ" value={currentDebt.amount || 0} onChange={(v)=> setCurrentDebt({ ...currentDebt, amount: v })} style={styles.input} />
           <Paragraph style={{ marginTop: -8, marginBottom: 8, textAlign: 'right' }}>{formatCurrency(currentDebt.amount || 0)}</Paragraph>
           <List.Item title="تاریخ سررسید" description={formatPersianDate(currentDebt.dueDate || new Date())} />

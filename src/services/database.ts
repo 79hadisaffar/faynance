@@ -8,6 +8,16 @@ class DatabaseService {
   async init() {
     try {
       this.db = await SQLite.openDatabaseAsync('finance.db');
+      // بهبودهای SQLite برای قابلیت اطمینان و کارایی
+      try {
+        await this.db.execAsync('PRAGMA foreign_keys = ON;');
+        await this.db.execAsync('PRAGMA journal_mode = WAL;');
+        await this.db.execAsync('PRAGMA synchronous = NORMAL;');
+        await this.db.execAsync('PRAGMA busy_timeout = 3000;');
+      } catch (e) {
+        // در برخی دستگاه‌ها/نسخه‌ها ممکن است همه پراگماها پشتیبانی نشوند
+        console.warn('SQLite PRAGMA setup warning:', e);
+      }
       await this.createTables();
       console.log('✅ Database initialized successfully');
     } catch (error) {
@@ -54,6 +64,7 @@ class DatabaseService {
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS debts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT,
         personName TEXT NOT NULL,
         amount REAL NOT NULL,
         description TEXT,
@@ -72,6 +83,7 @@ class DatabaseService {
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS credits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT,
         personName TEXT NOT NULL,
         amount REAL NOT NULL,
         description TEXT,
@@ -84,6 +96,20 @@ class DatabaseService {
     `);
     await this.db.execAsync(`CREATE INDEX IF NOT EXISTS idx_credits_dueDate ON credits(dueDate);`);
     await this.db.execAsync(`CREATE INDEX IF NOT EXISTS idx_credits_isReceived ON credits(isReceived);`);
+
+    // If older DB exists without 'phone' column, attempt to add it (safe migration)
+    try {
+      const debtCols = await this.db.getAllAsync<any>("PRAGMA table_info('debts');");
+      if (!debtCols.find((c: any) => c.name === 'phone')) {
+        await this.db.execAsync("ALTER TABLE debts ADD COLUMN phone TEXT;");
+      }
+    } catch (e) {}
+    try {
+      const credCols = await this.db.getAllAsync<any>("PRAGMA table_info('credits');");
+      if (!credCols.find((c: any) => c.name === 'phone')) {
+        await this.db.execAsync("ALTER TABLE credits ADD COLUMN phone TEXT;");
+      }
+    } catch (e) {}
 
     // جدول چک‌ها
     await this.db.execAsync(`
@@ -330,9 +356,10 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
     
     const result = await this.db.runAsync(
-      `INSERT INTO debts (personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO debts (phone, personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        debt.phone || null,
         debt.personName,
         debt.amount,
         debt.description,
@@ -392,9 +419,10 @@ class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
     
     const result = await this.db.runAsync(
-      `INSERT INTO credits (personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO credits (phone, personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
+        credit.phone || null,
         credit.personName,
         credit.amount,
         credit.description,
@@ -658,72 +686,81 @@ class DatabaseService {
     const accounts: any[] = obj.accounts || [];
     const reminders: any[] = obj.reminders || [];
 
-    // پاکسازی جداول (با ترتیب امن)
-    await this.db.runAsync('DELETE FROM installment_payments');
-    await this.db.runAsync('DELETE FROM installments');
-    await this.db.runAsync('DELETE FROM debts');
-    await this.db.runAsync('DELETE FROM credits');
-    await this.db.runAsync('DELETE FROM checks');
-    await this.db.runAsync('DELETE FROM expenses');
-    await this.db.runAsync('DELETE FROM accounts');
-    await this.db.runAsync('DELETE FROM reminders');
+    // همه عملیات را در تراکنش انجام می‌دهیم تا اتمیک و سریع باشد
+    await this.db.execAsync('BEGIN');
+    try {
+      // پاکسازی جداول (با ترتیب امن)
+      await this.db.runAsync('DELETE FROM installment_payments');
+      await this.db.runAsync('DELETE FROM installments');
+      await this.db.runAsync('DELETE FROM debts');
+      await this.db.runAsync('DELETE FROM credits');
+      await this.db.runAsync('DELETE FROM checks');
+      await this.db.runAsync('DELETE FROM expenses');
+      await this.db.runAsync('DELETE FROM accounts');
+      await this.db.runAsync('DELETE FROM reminders');
 
-    // درج داده‌ها با حفظ id در صورت موجود بودن
-    for (const it of installments) {
-      await this.db.runAsync(
-        `INSERT INTO installments (id, title, totalAmount, installmentCount, paidCount, installmentAmount, startDate, dueDay, description, isPaid, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [it.id || null, it.title, it.totalAmount, it.installmentCount, it.paidCount || 0, it.installmentAmount, it.startDate, it.dueDay, it.description || null, it.isPaid ? 1 : 0, it.createdAt, it.updatedAt]
-      );
-    }
-    for (const p of payments) {
-      await this.db.runAsync(
-        `INSERT INTO installment_payments (id, installmentId, monthIndex, dueDate, isPaid, paidAt)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [p.id || null, p.installmentId, p.monthIndex, p.dueDate, p.isPaid ? 1 : 0, p.paidAt || null]
-      );
-    }
-    for (const d of debts) {
-      await this.db.runAsync(
-        `INSERT INTO debts (id, personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [d.id || null, d.personName, d.amount, d.description || null, d.dueDate, d.isPaid ? 1 : 0, d.reminderDays ?? 3, d.createdAt, d.updatedAt]
-      );
-    }
-    for (const c of credits) {
-      await this.db.runAsync(
-        `INSERT INTO credits (id, personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [c.id || null, c.personName, c.amount, c.description || null, c.dueDate, c.isReceived ? 1 : 0, c.reminderDays ?? 3, c.createdAt, c.updatedAt]
-      );
-    }
-    for (const k of checks) {
-      await this.db.runAsync(
-        `INSERT INTO checks (id, checkNumber, amount, bankName, dueDate, type, status, personName, description, reminderDays, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [k.id || null, k.checkNumber, k.amount, k.bankName, k.dueDate, k.type, k.status || 'pending', k.personName, k.description || null, k.reminderDays ?? 3, k.createdAt, k.updatedAt]
-      );
-    }
-    for (const e of expenses) {
-      await this.db.runAsync(
-        `INSERT INTO expenses (id, title, amount, dueDate, description, reminderDays, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [e.id || null, e.title, e.amount, e.dueDate, e.description || null, e.reminderDays ?? 3, e.createdAt, e.updatedAt]
-      );
-    }
-    for (const a of accounts) {
-      await this.db.runAsync(
-        `INSERT INTO accounts (id, title, bankName, cardLast4, balance, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [a.id || null, a.title, a.bankName || null, a.cardLast4 || null, a.balance || 0, a.createdAt, a.updatedAt]
-      );
-    }
-    for (const r of reminders) {
-      await this.db.runAsync(
-        `INSERT INTO reminders (id, title, message, dueDate, isActive, itemType, itemId, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.id || null, r.title, r.message, r.dueDate, r.isActive ? 1 : 0, r.itemType, r.itemId, r.createdAt]
-      );
+      // درج داده‌ها با حفظ id در صورت موجود بودن
+      for (const it of installments) {
+        await this.db.runAsync(
+          `INSERT INTO installments (id, title, totalAmount, installmentCount, paidCount, installmentAmount, startDate, dueDay, description, isPaid, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [it.id || null, it.title, it.totalAmount, it.installmentCount, it.paidCount || 0, it.installmentAmount, it.startDate, it.dueDay, it.description || null, it.isPaid ? 1 : 0, it.createdAt, it.updatedAt]
+        );
+      }
+      for (const p of payments) {
+        await this.db.runAsync(
+          `INSERT INTO installment_payments (id, installmentId, monthIndex, dueDate, isPaid, paidAt)
+           VALUES (?, ?, ?, ?, ?, ?)` ,
+          [p.id || null, p.installmentId, p.monthIndex, p.dueDate, p.isPaid ? 1 : 0, p.paidAt || null]
+        );
+      }
+      for (const d of debts) {
+        await this.db.runAsync(
+          `INSERT INTO debts (id, personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [d.id || null, d.personName, d.amount, d.description || null, d.dueDate, d.isPaid ? 1 : 0, d.reminderDays ?? 3, d.createdAt, d.updatedAt]
+        );
+      }
+      for (const c of credits) {
+        await this.db.runAsync(
+          `INSERT INTO credits (id, personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [c.id || null, c.personName, c.amount, c.description || null, c.dueDate, c.isReceived ? 1 : 0, c.reminderDays ?? 3, c.createdAt, c.updatedAt]
+        );
+      }
+      for (const k of checks) {
+        await this.db.runAsync(
+          `INSERT INTO checks (id, checkNumber, amount, bankName, dueDate, type, status, personName, description, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [k.id || null, k.checkNumber, k.amount, k.bankName, k.dueDate, k.type, k.status || 'pending', k.personName, k.description || null, k.reminderDays ?? 3, k.createdAt, k.updatedAt]
+        );
+      }
+      for (const e of expenses) {
+        await this.db.runAsync(
+          `INSERT INTO expenses (id, title, amount, dueDate, description, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [e.id || null, e.title, e.amount, e.dueDate, e.description || null, e.reminderDays ?? 3, e.createdAt, e.updatedAt]
+        );
+      }
+      for (const a of accounts) {
+        await this.db.runAsync(
+          `INSERT INTO accounts (id, title, bankName, cardLast4, balance, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)` ,
+          [a.id || null, a.title, a.bankName || null, a.cardLast4 || null, a.balance || 0, a.createdAt, a.updatedAt]
+        );
+      }
+      for (const r of reminders) {
+        await this.db.runAsync(
+          `INSERT INTO reminders (id, title, message, dueDate, isActive, itemType, itemId, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [r.id || null, r.title, r.message, r.dueDate, r.isActive ? 1 : 0, r.itemType, r.itemId, r.createdAt]
+        );
+      }
+
+      await this.db.execAsync('COMMIT');
+    } catch (e) {
+      await this.db.execAsync('ROLLBACK');
+      throw e;
     }
   }
 }

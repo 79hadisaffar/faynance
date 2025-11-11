@@ -155,12 +155,18 @@ export default function InstallmentsScreen() {
       };
 
       if (editMode && currentInstallment.id) {
+        // Ensure numeric fields are proper types when updating
         await DatabaseService.updateInstallment(currentInstallment.id, {
-          ...patch,
+          title: String(patch.title),
+          installmentAmount: Number(patch.installmentAmount),
+          installmentCount: Number(patch.installmentCount),
+          totalAmount: Number(patch.totalAmount),
+          dueDay: Number(patch.dueDay),
+          description: patch.description ?? undefined,
           updatedAt: new Date().toISOString(),
         });
         // برنامه‌ی اقساط را با پارامترهای جدید همگام می‌کنیم (حفظ تعداد پرداخت‌شده‌ها)
-        await (DatabaseService as any).syncInstallmentSchedule?.(currentInstallment.id);
+        await DatabaseService.syncInstallmentSchedule(currentInstallment.id);
       } else {
         const id = await DatabaseService.addInstallment({
           ...(patch as Installment),
@@ -180,8 +186,9 @@ export default function InstallmentsScreen() {
       }
       hideModal();
       loadInstallments();
-    } catch (error) {
-      if (!opts?.silent) Alert.alert('خطا', 'خطا در ذخیره اطلاعات');
+    } catch (error: any) {
+      console.error('saveInstallment error:', error);
+      if (!opts?.silent) Alert.alert('خطا در ذخیره', error?.message ? String(error.message) : String(error));
     }
   };
 
@@ -362,12 +369,7 @@ export default function InstallmentsScreen() {
         </Modal>
       </Portal>
 
-      <PersianDatePicker
-        visible={dateOpen}
-        initialISO={currentInstallment.startDate as string}
-        onCancel={()=>setDateOpen(false)}
-        onConfirm={(iso)=>{ setCurrentInstallment({ ...currentInstallment, startDate: iso }); setDateOpen(false); }}
-      />
+      {/* حذف DatePicker تکراری: انتخاب تاریخ به‌صورت inline داخل مودال انجام می‌شود */}
     </View>
   );
 }

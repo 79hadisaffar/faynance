@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, FlatList, StyleSheet, Alert, RefreshControl, AppState } from 'react-native';
-import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, Checkbox, List } from 'react-native-paper';
+import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, Checkbox, List, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Installment } from '../models/types';
 import { formatPersianDate, formatCurrency, generateMonthlySchedule, jDayFromISO, toEnglishDigits } from '../utils/helpers';
@@ -21,6 +21,9 @@ export default function InstallmentsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
+  const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // ورودی مبلغ ماهانه با AmountInput قالب‌بندی می‌شود
 
   useEffect(() => {
@@ -143,6 +146,7 @@ export default function InstallmentsScreen() {
     }
 
     try {
+      setSaving(true);
       const dueDay = jDayFromISO(currentInstallment.startDate as string);
       const totalAmount = monthly * count;
       const patch: Partial<Installment> = {
@@ -185,10 +189,13 @@ export default function InstallmentsScreen() {
         }
       }
       hideModal();
-      loadInstallments();
+      await loadInstallments();
     } catch (error: any) {
       console.error('saveInstallment error:', error);
       if (!opts?.silent) Alert.alert('خطا در ذخیره', error?.message ? String(error.message) : String(error));
+    }
+    finally {
+      setSaving(false);
     }
   };
 
@@ -201,9 +208,24 @@ export default function InstallmentsScreen() {
         {
           text: 'حذف',
           style: 'destructive',
-          onPress: async () => {
-            await DatabaseService.deleteInstallment(id);
-            loadInstallments();
+          onPress: () => {
+            // Optimistic remove and schedule actual delete with undo
+            const backup = installments.find(i => i.id === id);
+            setInstallments(prev => prev.filter(i => i.id !== id));
+            setSnack({ visible: true, message: 'قسط حذف شد', undo: async () => {
+              // cancel pending delete and restore
+              const to = pendingDeletes.current.get(id);
+              if (to) clearTimeout(to);
+              pendingDeletes.current.delete(id);
+              if (backup) setInstallments(prev => [backup!, ...prev]);
+              setSnack({ visible: false, message: '' });
+            }});
+            const t = setTimeout(async () => {
+              try { await DatabaseService.deleteInstallment(id); } catch (e) { console.error('deleteInstallment failed', e); }
+              pendingDeletes.current.delete(id);
+              setSnack({ visible: false, message: '' });
+            }, 6000);
+            pendingDeletes.current.set(id, t);
           },
         },
       ]
@@ -331,11 +353,20 @@ export default function InstallmentsScreen() {
           </View>
           <List.Item title="یادآوری" description="یادآوری قسط بعدی"/>
           <View style={styles.modalButtons}>
-            <Button onPress={hideModal}>انصراف</Button>
-            <Button mode="contained" onPress={() => saveInstallment()}>ذخیره</Button>
+            <Button onPress={hideModal} disabled={saving}>انصراف</Button>
+            <Button mode="contained" onPress={() => saveInstallment()} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>
+
+      <Snackbar
+        visible={snack.visible}
+        onDismiss={() => setSnack({ visible: false, message: '' })}
+        action={snack.undo ? { label: 'واگرد', onPress: snack.undo } : undefined}
+        duration={6000}
+      >
+        {snack.message}
+      </Snackbar>
 
       <FAB
         style={styles.fab}

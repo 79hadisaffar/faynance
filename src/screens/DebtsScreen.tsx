@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch } from 'react-native-paper';
+import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Debt } from '../models/types';
 import { formatPersianDate, formatCurrency, toEnglishDigits } from '../utils/helpers';
@@ -22,6 +22,9 @@ export default function DebtsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
+  const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [next30, setNext30] = useState(false);
@@ -143,24 +146,45 @@ export default function DebtsScreen() {
 
   const saveDebt = async () => {
     if (!currentDebt.personName || !currentDebt.amount) return;
-    if (editMode && currentDebt.id) {
-      await DatabaseService.updateDebt(currentDebt.id, { ...currentDebt, updatedAt: new Date().toISOString() });
-    } else {
-      const id = await DatabaseService.addDebt(currentDebt as Debt);
-      if (enableReminder) {
-        await NotificationService.scheduleDebtReminder(
-          currentDebt.personName!, currentDebt.amount!, new Date(currentDebt.dueDate!), currentDebt.reminderDays ?? 3
-        );
+    setSaving(true);
+    try {
+      if (editMode && currentDebt.id) {
+        await DatabaseService.updateDebt(currentDebt.id, { ...currentDebt, updatedAt: new Date().toISOString() });
+      } else {
+        const id = await DatabaseService.addDebt(currentDebt as Debt);
+        if (enableReminder) {
+          await NotificationService.scheduleDebtReminder(
+            currentDebt.personName!, currentDebt.amount!, new Date(currentDebt.dueDate!), currentDebt.reminderDays ?? 3
+          );
+        }
       }
+      hideModal();
+      await loadDebts();
+    } finally {
+      setSaving(false);
     }
-    hideModal();
-    loadDebts();
   };
 
   const deleteDebt = (id: number) => {
     Alert.alert('حذف بدهی', 'آیا از حذف این بدهی مطمئن هستید؟', [
       { text: 'انصراف', style: 'cancel' },
-      { text: 'حذف', style: 'destructive', onPress: () => DatabaseService.deleteDebt(id).then(loadDebts) },
+      { text: 'حذف', style: 'destructive', onPress: () => {
+        const backup = debts.find(d => d.id === id);
+        setDebts(prev => prev.filter(d => d.id !== id));
+        setSnack({ visible: true, message: 'بدهی حذف شد', undo: async () => {
+          const to = pendingDeletes.current.get(id);
+          if (to) clearTimeout(to);
+          pendingDeletes.current.delete(id);
+          if (backup) setDebts(prev => [backup!, ...prev]);
+          setSnack({ visible: false, message: '' });
+        }});
+        const t = setTimeout(async () => {
+          try { await DatabaseService.deleteDebt(id); } catch (e) { console.error('deleteDebt failed', e); }
+          pendingDeletes.current.delete(id);
+          setSnack({ visible: false, message: '' });
+        }, 6000);
+        pendingDeletes.current.set(id, t);
+      } },
     ]);
   };
 
@@ -299,11 +323,20 @@ export default function DebtsScreen() {
             setCurrentDebt({...currentDebt, reminderDays: parseInt(en)||3});
           }} style={styles.input} />
           <View style={styles.modalButtons}>
-            <Button onPress={hideModal}>انصراف</Button>
-            <Button mode="contained" onPress={saveDebt}>ذخیره</Button>
+            <Button onPress={hideModal} disabled={saving}>انصراف</Button>
+            <Button mode="contained" onPress={saveDebt} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>
+
+      <Snackbar
+        visible={snack.visible}
+        onDismiss={() => setSnack({ visible: false, message: '' })}
+        action={snack.undo ? { label: 'واگرد', onPress: snack.undo } : undefined}
+        duration={6000}
+      >
+        {snack.message}
+      </Snackbar>
 
       {/* date picker is now inline inside the modal */}
     </View>

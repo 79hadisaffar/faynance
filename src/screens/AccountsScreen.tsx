@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { FlatList, View, AppState } from 'react-native';
-import { Appbar, Button, Card, Dialog, List, Portal, Text, TextInput } from 'react-native-paper';
+import { Appbar, Button, Card, Dialog, List, Portal, Text, TextInput, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Account } from '../models/types';
 import { formatCurrency, parseSmsBalances } from '../utils/helpers';
@@ -47,6 +47,9 @@ export default function AccountsScreen() {
   };
 
   const [edit, setEdit] = useState<Account | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
+  const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const saveEdit = async () => {
     if (!edit) return;
@@ -54,21 +57,41 @@ export default function AccountsScreen() {
       // جلوگیری از ذخیره نام خالی
       return;
     }
-    const now = new Date().toISOString();
-    if (edit.id) {
-      await (DatabaseService as any).updateAccount?.(edit.id, { ...edit, updatedAt: now });
-    } else {
-      await (DatabaseService as any).addAccount?.({ title: edit.title || '', bankName: edit.bankName || '', cardLast4: edit.cardLast4 || '', balance: edit.balance || 0, createdAt: edit.createdAt || now, updatedAt: now });
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      if (edit.id) {
+        await (DatabaseService as any).updateAccount?.(edit.id, { ...edit, updatedAt: now });
+      } else {
+        await (DatabaseService as any).addAccount?.({ title: edit.title || '', bankName: edit.bankName || '', cardLast4: edit.cardLast4 || '', balance: edit.balance || 0, createdAt: edit.createdAt || now, updatedAt: now });
+      }
+      setEdit(null);
+      await load();
+    } finally {
+      setSaving(false);
     }
-    setEdit(null);
-    await load();
   };
 
   const removeAccount = async () => {
     if (!edit || !edit.id) { setEdit(null); return; }
-    await (DatabaseService as any).deleteAccount?.(edit.id);
+    const id = edit.id;
+    const backup = edit;
+    setAccounts(prev => prev.filter(a => a.id !== id));
     setEdit(null);
-    await load();
+    setSnack({ visible: true, message: 'حساب حذف شد', undo: async () => {
+      const to = pendingDeletes.current.get(id);
+      if (to) clearTimeout(to);
+      pendingDeletes.current.delete(id);
+      setAccounts(prev => [backup!, ...prev]);
+      setSnack({ visible: false, message: '' });
+    }});
+    const t = setTimeout(async () => {
+      try { await (DatabaseService as any).deleteAccount?.(id); } catch (e) { console.error('deleteAccount failed', e); }
+      pendingDeletes.current.delete(id);
+      setSnack({ visible: false, message: '' });
+      await load();
+    }, 6000);
+    pendingDeletes.current.set(id, t);
   };
 
   // ذخیره خودکار هنگام رفتن اپ به پس‌زمینه
@@ -155,10 +178,18 @@ export default function AccountsScreen() {
           <Dialog.Actions>
             <Button onPress={() => setEdit(null)}>انصراف</Button>
             {edit?.id ? <Button textColor="#f44336" onPress={removeAccount}>حذف</Button> : null}
-            <Button mode="contained" onPress={saveEdit}>ذخیره</Button>
+            <Button mode="contained" onPress={saveEdit} loading={saving} disabled={saving}>ذخیره</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
+      <Snackbar
+        visible={snack.visible}
+        onDismiss={() => setSnack({ visible: false, message: '' })}
+        action={snack.undo ? { label: 'واگرد', onPress: snack.undo } : undefined}
+        duration={6000}
+      >
+        {snack.message}
+      </Snackbar>
     </View>
   );
 }

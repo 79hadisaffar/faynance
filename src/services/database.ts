@@ -716,16 +716,16 @@ class DatabaseService {
       }
       for (const d of debts) {
         await this.db.runAsync(
-          `INSERT INTO debts (id, personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
-          [d.id || null, d.personName, d.amount, d.description || null, d.dueDate, d.isPaid ? 1 : 0, d.reminderDays ?? 3, d.createdAt, d.updatedAt]
+          `INSERT INTO debts (id, phone, personName, amount, description, dueDate, isPaid, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [d.id || null, d.phone || null, d.personName, d.amount, d.description || null, d.dueDate, d.isPaid ? 1 : 0, d.reminderDays ?? 3, d.createdAt, d.updatedAt]
         );
       }
       for (const c of credits) {
         await this.db.runAsync(
-          `INSERT INTO credits (id, personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
-          [c.id || null, c.personName, c.amount, c.description || null, c.dueDate, c.isReceived ? 1 : 0, c.reminderDays ?? 3, c.createdAt, c.updatedAt]
+          `INSERT INTO credits (id, phone, personName, amount, description, dueDate, isReceived, reminderDays, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+          [c.id || null, c.phone || null, c.personName, c.amount, c.description || null, c.dueDate, c.isReceived ? 1 : 0, c.reminderDays ?? 3, c.createdAt, c.updatedAt]
         );
       }
       for (const k of checks) {

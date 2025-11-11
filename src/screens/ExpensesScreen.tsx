@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, SectionList, Pressable, StyleSheet, Alert, RefreshControl, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { FAB, Card, Title, Paragraph, IconButton, Portal, Modal, TextInput, Button, List, Chip } from 'react-native-paper';
+import { FAB, Card, Title, Paragraph, IconButton, Portal, Modal, TextInput, Button, List, Chip, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Expense } from '../models/types';
 import { formatCurrency, formatPersianDate, toEnglishDigits } from '../utils/helpers';
@@ -22,6 +22,9 @@ export default function ExpensesScreen() {
   const [current, setCurrent] = useState<Partial<Expense>>({});
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
+  const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
 
   const load = async () => {
@@ -90,26 +93,47 @@ export default function ExpensesScreen() {
 
   const save = async (opts?: { silent?: boolean }) => {
     if (!current.title || !current.amount) { if (!opts?.silent) Alert.alert('خطا','عنوان و مبلغ الزامی است'); return; }
-    if (editMode && current.id) {
-      await DatabaseService.updateExpense(current.id, { ...current, updatedAt: new Date().toISOString() });
-    } else {
-      const id = await DatabaseService.addExpense(current as Expense);
-      // schedule reminder
-      await NotificationService.scheduleReminder(
-        `مخارج: ${current.title}`,
-        `یادآوری پرداخت ${formatCurrency(current.amount!)} در تاریخ ${formatPersianDate(current.dueDate!)}`,
-        new Date(current.dueDate!),
-        current.reminderDays ?? 3
-      );
+    setSaving(true);
+    try {
+      if (editMode && current.id) {
+        await DatabaseService.updateExpense(current.id, { ...current, updatedAt: new Date().toISOString() });
+      } else {
+        const id = await DatabaseService.addExpense(current as Expense);
+        // schedule reminder
+        await NotificationService.scheduleReminder(
+          `مخارج: ${current.title}`,
+          `یادآوری پرداخت ${formatCurrency(current.amount!)} در تاریخ ${formatPersianDate(current.dueDate!)}`,
+          new Date(current.dueDate!),
+          current.reminderDays ?? 3
+        );
+      }
+      setVisible(false);
+      await load();
+    } finally {
+      setSaving(false);
     }
-    setVisible(false);
-    load();
   };
 
   const remove = (id: number) => {
     Alert.alert('حذف','آیا مطمئن هستید؟', [
       { text: 'انصراف', style: 'cancel' },
-      { text: 'حذف', style: 'destructive', onPress: async ()=>{ await DatabaseService.deleteExpense(id); load(); } }
+      { text: 'حذف', style: 'destructive', onPress: () => {
+        const backup = items.find(i => i.id === id);
+        setItems(prev => prev.filter(it => it.id !== id));
+        setSnack({ visible: true, message: 'مخارج حذف شد', undo: async () => {
+          const to = pendingDeletes.current.get(id);
+          if (to) clearTimeout(to);
+          pendingDeletes.current.delete(id);
+          if (backup) setItems(prev => [backup!, ...prev]);
+          setSnack({ visible: false, message: '' });
+        }});
+        const t = setTimeout(async () => {
+          try { await DatabaseService.deleteExpense(id); } catch (e) { console.error('deleteExpense failed', e); }
+          pendingDeletes.current.delete(id);
+          setSnack({ visible: false, message: '' });
+        }, 6000);
+        pendingDeletes.current.set(id, t);
+      } }
     ]);
   };
 
@@ -231,11 +255,20 @@ export default function ExpensesScreen() {
             }} />
           </View>
           <View style={styles.modalButtons}>
-            <Button onPress={()=>setVisible(false)}>انصراف</Button>
-            <Button mode="contained" onPress={() => save()}>ذخیره</Button>
+            <Button onPress={()=>setVisible(false)} disabled={saving}>انصراف</Button>
+            <Button mode="contained" onPress={() => save()} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>
+
+      <Snackbar
+        visible={snack.visible}
+        onDismiss={() => setSnack({ visible: false, message: '' })}
+        action={snack.undo ? { label: 'واگرد', onPress: snack.undo } : undefined}
+        duration={6000}
+      >
+        {snack.message}
+      </Snackbar>
 
       <PersianDatePicker
         visible={datePickerOpen}

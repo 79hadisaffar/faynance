@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
-import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch } from 'react-native-paper';
+import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Credit } from '../models/types';
 import { formatPersianDate, formatCurrency, toEnglishDigits } from '../utils/helpers';
@@ -22,6 +22,9 @@ export default function CreditsScreen() {
   const [enableReminder, setEnableReminder] = useState(true);
   const { colors } = useSettings();
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
+  const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   // ورودی مبلغ توسط AmountInput قالب‌بندی می‌شود
   const [onlyOpen, setOnlyOpen] = useState(true);
   const [next30, setNext30] = useState(false);
@@ -142,24 +145,45 @@ export default function CreditsScreen() {
 
   const saveCredit = async () => {
     if (!currentCredit.personName || !currentCredit.amount) return;
-    if (editMode && currentCredit.id) {
-      await DatabaseService.updateCredit(currentCredit.id, { ...currentCredit, updatedAt: new Date().toISOString() });
-    } else {
-      const id = await DatabaseService.addCredit(currentCredit as Credit);
-      if (enableReminder) {
-        await NotificationService.scheduleCreditReminder(
-          currentCredit.personName!, currentCredit.amount!, new Date(currentCredit.dueDate!), currentCredit.reminderDays ?? 3
-        );
+    setSaving(true);
+    try {
+      if (editMode && currentCredit.id) {
+        await DatabaseService.updateCredit(currentCredit.id, { ...currentCredit, updatedAt: new Date().toISOString() });
+      } else {
+        const id = await DatabaseService.addCredit(currentCredit as Credit);
+        if (enableReminder) {
+          await NotificationService.scheduleCreditReminder(
+            currentCredit.personName!, currentCredit.amount!, new Date(currentCredit.dueDate!), currentCredit.reminderDays ?? 3
+          );
+        }
       }
+      hideModal();
+      await loadCredits();
+    } finally {
+      setSaving(false);
     }
-    hideModal();
-    loadCredits();
   };
 
   const deleteCredit = (id: number) => {
     Alert.alert('حذف طلب', 'آیا از حذف این مورد مطمئن هستید؟', [
       { text: 'انصراف', style: 'cancel' },
-      { text: 'حذف', style: 'destructive', onPress: () => DatabaseService.deleteCredit(id).then(loadCredits) },
+      { text: 'حذف', style: 'destructive', onPress: () => {
+        const backup = credits.find(c => c.id === id);
+        setCredits(prev => prev.filter(c => c.id !== id));
+        setSnack({ visible: true, message: 'طلب حذف شد', undo: async () => {
+          const to = pendingDeletes.current.get(id);
+          if (to) clearTimeout(to);
+          pendingDeletes.current.delete(id);
+          if (backup) setCredits(prev => [backup!, ...prev]);
+          setSnack({ visible: false, message: '' });
+        }});
+        const t = setTimeout(async () => {
+          try { await DatabaseService.deleteCredit(id); } catch (e) { console.error('deleteCredit failed', e); }
+          pendingDeletes.current.delete(id);
+          setSnack({ visible: false, message: '' });
+        }, 6000);
+        pendingDeletes.current.set(id, t);
+      } },
     ]);
   };
   const toggleReceived = (credit: Credit) => { DatabaseService.updateCredit(credit.id!, { isReceived: !credit.isReceived }).then(loadCredits); };
@@ -289,11 +313,20 @@ export default function CreditsScreen() {
             setCurrentCredit({...currentCredit, reminderDays: parseInt(en)||3})
           }} style={styles.input} />
           <View style={styles.modalButtons}>
-            <Button onPress={hideModal}>انصراف</Button>
-            <Button mode="contained" onPress={saveCredit}>ذخیره</Button>
+            <Button onPress={hideModal} disabled={saving}>انصراف</Button>
+            <Button mode="contained" onPress={saveCredit} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>
+
+      <Snackbar
+        visible={snack.visible}
+        onDismiss={() => setSnack({ visible: false, message: '' })}
+        action={snack.undo ? { label: 'واگرد', onPress: snack.undo } : undefined}
+        duration={6000}
+      >
+        {snack.message}
+      </Snackbar>
 
       {/* date picker rendered inline in modal */}
     </View>

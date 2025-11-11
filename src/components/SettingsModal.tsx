@@ -76,6 +76,7 @@ export default function SettingsModal() {
           <List.Subheader>فونت و اندازه</List.Subheader>
           <RadioButton.Group onValueChange={(v)=>setFontFamily(v)} value={fontFamily}>
             <RadioButton.Item label="سیستمی" value="" />
+            <RadioButton.Item label="Vazirmatn (پیشنهاد فارسی)" value="Vazirmatn" />
             <RadioButton.Item label="IRANSans (در صورت نصب)" value="IRANSans" />
             <RadioButton.Item label="Sans Serif" value="sans-serif" />
             <RadioButton.Item label="Sans Serif Medium" value="sans-serif-medium" />
@@ -93,26 +94,7 @@ export default function SettingsModal() {
         </List.Section>
 
         
-            <List.Section>
-              <List.Subheader>فونت و اندازه</List.Subheader>
-              <List.Item
-                title="فونت"
-                description={fontFamily || 'System'}
-                right={() => (
-                  <Button onPress={() => setFontFamily(fontFamily ? '' : 'System')}>{fontFamily ? 'System' : 'System'}</Button>
-                )}
-              />
-              <List.Item
-                title="اندازه فونت"
-                description={`x${fontScale.toFixed(1)}`}
-                right={() => (
-                  <>
-                    <Button onPress={decFont}>-</Button>
-                    <Button onPress={incFont}>+</Button>
-                  </>
-                )}
-              />
-            </List.Section>
+            {/* فونت و اندازه در بالا مدیریت می‌شود */}
 
             <Divider style={{ marginVertical: 8 }} />
 

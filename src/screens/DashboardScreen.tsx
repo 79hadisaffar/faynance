@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
-import { Card, Title, Paragraph, Button, Surface, Chip } from 'react-native-paper';
+import { Card, Title, Paragraph, Button, Surface, Chip, List, Checkbox } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DatabaseService from '../services/database';
 import { FinancialSummary } from '../models/types';
-import { formatCurrency, addMonths, groupAmountsByJMonth, jMonthKeyToFa, jMonthKeyToNum } from '../utils/helpers';
+import { formatCurrency, addMonths, groupAmountsByJMonth, jMonthKeyToFa, jMonthKeyToNum, isInCurrentJMonth, formatPersianDate } from '../utils/helpers';
 import ChartCard from '../components/ChartCard';
+import AnimatedNumber from '../components/AnimatedNumber';
+import AnimatedCard from '../components/AnimatedCard';
 import { useSettings } from '../theme';
 
 export default function DashboardScreen() {
@@ -52,6 +54,8 @@ export default function DashboardScreen() {
     expenses: { today: 0, week: 0 },
   });
   const [liq, setLiq] = useState<{ weeks: number[]; total30: number }>({ weeks: [0,0,0,0], total30: 0 });
+  const [thisMonthInst, setThisMonthInst] = useState<{ count: number; total: number }>({ count: 0, total: 0 });
+  const [thisMonthList, setThisMonthList] = useState<Array<{ installmentId: number; monthIndex: number; dueDate: string; amount: number; title: string; isPaid: boolean }>>([]);
 
   const loadSummary = async () => {
     try {
@@ -121,6 +125,21 @@ export default function DashboardScreen() {
         installments: installmentsInRange,
         expenses: expensesInRange,
       });
+
+      // اقساط باقیمانده «ماه جاری جلالی»
+      const thisMonthPayments = (allPayments as any[]).filter((p:any)=> !p.isPaid && isInCurrentJMonth(p.dueDate));
+      const thisMonthTotal = thisMonthPayments.reduce((s:number,p:any)=> s + (instAmountById.get(p.installmentId) || 0), 0);
+      setThisMonthInst({ count: thisMonthPayments.length, total: thisMonthTotal });
+      // فهرست جزئیات اقساط این ماه (پرداخت‌نشده)
+      const thisMonthDetailed = thisMonthPayments.map((p:any) => ({
+        installmentId: p.installmentId,
+        monthIndex: p.monthIndex,
+        dueDate: p.dueDate,
+        isPaid: !!p.isPaid,
+        title: installments.find((i:any)=> i.id === p.installmentId)?.title || 'قسط',
+        amount: instAmountById.get(p.installmentId) || 0,
+      }));
+      setThisMonthList(thisMonthDetailed);
 
       // مرور امروز / ۷ روز آینده
       const daysDiff = (iso: string) => {
@@ -254,36 +273,47 @@ export default function DashboardScreen() {
     setRefreshing(false);
   };
 
+  const togglePaymentQuick = async (installmentId: number, monthIndex: number, val: boolean) => {
+    try {
+      await DatabaseService.toggleInstallmentPayment(installmentId, monthIndex, val);
+      await loadSummary();
+    } catch (e) {
+      console.error('togglePaymentQuick error', e);
+    }
+  };
+
   return (
     <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-  <Surface style={[styles.headerCard, { backgroundColor: colors.dashboard }]}>
+  <AnimatedCard index={0} style={[styles.headerCard, { backgroundColor: colors.dashboard }]}>
         <Title style={styles.headerTitle}>خلاصه وضعیت مالی</Title>
         <View style={styles.balanceContainer}>
           <Title style={[styles.balanceAmount, summary.netBalance >= 0 ? styles.positive : styles.negative]}>
-            {formatCurrency(Math.abs(summary.netBalance))}
+            <AnimatedNumber value={Math.abs(summary.netBalance)} />
           </Title>
           <Paragraph style={styles.balanceLabel}>
             {summary.netBalance >= 0 ? 'موجودی خالص' : 'کسری بودجه'}
           </Paragraph>
           <Paragraph style={[styles.balanceLabel, { marginTop: 4 }]}>
-            مجموع موجودی کارت‌ها: {formatCurrency(accountsTotal)}
+            مجموع موجودی کارت‌ها: <AnimatedNumber value={accountsTotal} />
           </Paragraph>
         </View>
-      </Surface>
+      </AnimatedCard>
 
       {/* موجودی کارت‌ها به صورت کارت مجزا برای وضوح بیشتر */}
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="wallet" size={28} color="#7b1fa2" />
-            <Title style={styles.cardTitle}>موجودی کارت‌ها</Title>
-          </View>
-          <Paragraph style={styles.amount}>{formatCurrency(accountsTotal)}</Paragraph>
-        </Card.Content>
-      </Card>
+      <AnimatedCard index={1} style={{ marginBottom: 12 }}>{/* wrapper for simple slide+fade */}
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="wallet" size={28} color="#7b1fa2" />
+              <Title style={styles.cardTitle}>موجودی کارت‌ها</Title>
+            </View>
+            <Paragraph style={styles.amount}><AnimatedNumber value={accountsTotal} /></Paragraph>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
 
       <View style={styles.rangeRow}>
         <Chip compact selected={rangeMonths === 1} onPress={() => setRangeMonths(1)} style={styles.chip}>۱ ماهه</Chip>
@@ -293,21 +323,23 @@ export default function DashboardScreen() {
       </View>
 
       {/* مرور امروز و ۷ روز آینده */}
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="calendar-today" size={28} color="#ff7043" />
-            <Title style={styles.cardTitle}>مرور امروز و ۷ روز آینده</Title>
-          </View>
-          <View style={[styles.rangeRow, { flexWrap: 'wrap' }]}>
-            <Chip compact style={styles.chip}>بدهی: امروز {todayWeek.debts.today} | هفته {todayWeek.debts.week}</Chip>
-            <Chip compact style={styles.chip}>طلب: امروز {todayWeek.credits.today} | هفته {todayWeek.credits.week}</Chip>
-            <Chip compact style={styles.chip}>چک: امروز {todayWeek.checks.today} | هفته {todayWeek.checks.week}</Chip>
-            <Chip compact style={styles.chip}>قسط: امروز {todayWeek.installments.today} | هفته {todayWeek.installments.week}</Chip>
-            <Chip compact style={styles.chip}>مخارج: امروز {todayWeek.expenses.today} | هفته {todayWeek.expenses.week}</Chip>
-          </View>
-        </Card.Content>
-      </Card>
+      <AnimatedCard index={2} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="calendar-today" size={28} color="#ff7043" />
+              <Title style={styles.cardTitle}>مرور امروز و ۷ روز آینده</Title>
+            </View>
+            <View style={[styles.rangeRow, { flexWrap: 'wrap' }]}>
+              <Chip compact style={styles.chip}>بدهی: امروز {todayWeek.debts.today} | هفته {todayWeek.debts.week}</Chip>
+              <Chip compact style={styles.chip}>طلب: امروز {todayWeek.credits.today} | هفته {todayWeek.credits.week}</Chip>
+              <Chip compact style={styles.chip}>چک: امروز {todayWeek.checks.today} | هفته {todayWeek.checks.week}</Chip>
+              <Chip compact style={styles.chip}>قسط: امروز {todayWeek.installments.today} | هفته {todayWeek.installments.week}</Chip>
+              <Chip compact style={styles.chip}>مخارج: امروز {todayWeek.expenses.today} | هفته {todayWeek.expenses.week}</Chip>
+            </View>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
 
       {/* سری‌های نمودار روند: نمایش/مخفی کردن هر بخش */}
       <View style={[styles.rangeRow, { marginBottom: 4, flexWrap: 'wrap' }]}>
@@ -348,7 +380,8 @@ export default function DashboardScreen() {
         >مخارج</Chip>
       </View>
 
-      <ChartCard
+      <AnimatedCard index={3} style={{ marginBottom: 12 }}>
+        <ChartCard
         title={`نمودار بخش‌ها (${rangeMonths === 12 ? '۱ ساله' : rangeMonths + ' ماهه'})`}
         color={colors.dashboard}
         labels={[ '۱', '۲', '۳', '۴', '۵' ]}
@@ -361,9 +394,11 @@ export default function DashboardScreen() {
           { name: '۵- مخارج', color: colors.expenses },
         ]}
         xCategories={[ 'بدهی', 'طلب', 'چک', 'اقساط', 'مخارج' ]}
-      />
+        />
+      </AnimatedCard>
 
-      <ChartCard
+      <AnimatedCard index={4} style={{ marginBottom: 12 }}>
+        <ChartCard
         title={`روند ماهانه بخش‌ها (${rangeMonths === 12 ? '۱ ساله' : rangeMonths + ' ماهه'})`}
         chartType="line"
         labels={trendLabels}
@@ -381,75 +416,119 @@ export default function DashboardScreen() {
           (d.name === 'اقساط' && seriesEnabled.installments) ||
           (d.name === 'مخارج' && seriesEnabled.expenses)
         )).map(d => ({ name: d.name, color: d.color }))}
-      />
+        />
+      </AnimatedCard>
 
       {/* تقویم نقدینگی ۴ هفته آینده */}
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="calendar-range" size={28} color="#0277bd" />
-            <Title style={styles.cardTitle}>تقویم نقدینگی (۴ هفته آینده)</Title>
-          </View>
-          <View style={[styles.rangeRow, { flexWrap: 'wrap' }]}>
-            <Chip compact style={styles.chip}>هفته ۱: {formatCurrency(Math.abs(liq.weeks[0]))} {liq.weeks[0] >= 0 ? 'ورود' : 'خروج'}</Chip>
-            <Chip compact style={styles.chip}>هفته ۲: {formatCurrency(Math.abs(liq.weeks[1]))} {liq.weeks[1] >= 0 ? 'ورود' : 'خروج'}</Chip>
-            <Chip compact style={styles.chip}>هفته ۳: {formatCurrency(Math.abs(liq.weeks[2]))} {liq.weeks[2] >= 0 ? 'ورود' : 'خروج'}</Chip>
-            <Chip compact style={styles.chip}>هفته ۴: {formatCurrency(Math.abs(liq.weeks[3]))} {liq.weeks[3] >= 0 ? 'ورود' : 'خروج'}</Chip>
-          </View>
-          <Paragraph style={{ textAlign: 'right', marginTop: 8, color: liq.total30 >= 0 ? '#2e7d32' : '#c62828' }}>
-            جمع ۳۰ روز آینده: {formatCurrency(Math.abs(liq.total30))} {liq.total30 >= 0 ? 'ورود' : 'خروج'}
-          </Paragraph>
-        </Card.Content>
-      </Card>
-
-      {liq.total30 < 0 && (
-        <Card style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#c62828' }]}>
+      <AnimatedCard index={5} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
           <Card.Content>
-            <Title style={{ color: '#c62828', fontSize: 16 }}>هشدار کسری نقدینگی</Title>
-            <Paragraph style={{ textAlign: 'right' }}>
-              جمع خروجی ۳۰ روز آینده از ورودی بیشتر است. برای جلوگیری از کمبود نقدینگی برنامه‌ریزی کن.
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="calendar-range" size={28} color="#0277bd" />
+              <Title style={styles.cardTitle}>تقویم نقدینگی (۴ هفته آینده)</Title>
+            </View>
+            <View style={[styles.rangeRow, { flexWrap: 'wrap' }]}>
+              <Chip compact style={styles.chip}>هفته ۱: {formatCurrency(Math.abs(liq.weeks[0]))} {liq.weeks[0] >= 0 ? 'ورود' : 'خروج'}</Chip>
+              <Chip compact style={styles.chip}>هفته ۲: {formatCurrency(Math.abs(liq.weeks[1]))} {liq.weeks[1] >= 0 ? 'ورود' : 'خروج'}</Chip>
+              <Chip compact style={styles.chip}>هفته ۳: {formatCurrency(Math.abs(liq.weeks[2]))} {liq.weeks[2] >= 0 ? 'ورود' : 'خروج'}</Chip>
+              <Chip compact style={styles.chip}>هفته ۴: {formatCurrency(Math.abs(liq.weeks[3]))} {liq.weeks[3] >= 0 ? 'ورود' : 'خروج'}</Chip>
+            </View>
+            <Paragraph style={{ textAlign: 'right', marginTop: 8, color: liq.total30 >= 0 ? '#2e7d32' : '#c62828' }}>
+              جمع ۳۰ روز آینده: <AnimatedNumber value={Math.abs(liq.total30)} /> {liq.total30 >= 0 ? 'ورود' : 'خروج'}
             </Paragraph>
           </Card.Content>
         </Card>
+      </AnimatedCard>
+
+      {liq.total30 < 0 && (
+        <AnimatedCard index={6} style={{ marginBottom: 12 }}>
+          <Card style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#c62828' }]}> 
+            <Card.Content>
+              <Title style={{ color: '#c62828', fontSize: 16 }}>هشدار کسری نقدینگی</Title>
+              <Paragraph style={{ textAlign: 'right' }}>
+                جمع خروجی ۳۰ روز آینده از ورودی بیشتر است. برای جلوگیری از کمبود نقدینگی برنامه‌ریزی کن.
+              </Paragraph>
+            </Card.Content>
+          </Card>
+        </AnimatedCard>
       )}
 
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="cash-minus" size={28} color="#f44336" />
-            <Title style={styles.cardTitle}>بدهی‌ها</Title>
-          </View>
-          <Paragraph style={styles.amount}>{formatCurrency(summary.totalDebts)}</Paragraph>
-        </Card.Content>
-      </Card>
+      <AnimatedCard index={7} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="cash-minus" size={28} color="#f44336" />
+              <Title style={styles.cardTitle}>بدهی‌ها</Title>
+            </View>
+            <Paragraph style={styles.amount}><AnimatedNumber value={summary.totalDebts} /></Paragraph>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
 
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="cash-plus" size={28} color="#4caf50" />
-            <Title style={styles.cardTitle}>طلب‌ها</Title>
-          </View>
-          <Paragraph style={styles.amount}>{formatCurrency(summary.totalCredits)}</Paragraph>
-        </Card.Content>
-      </Card>
+      <AnimatedCard index={8} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="cash-plus" size={28} color="#4caf50" />
+              <Title style={styles.cardTitle}>طلب‌ها</Title>
+            </View>
+            <Paragraph style={styles.amount}><AnimatedNumber value={summary.totalCredits} /></Paragraph>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
 
-      <Card style={styles.card}>
-        <Card.Content>
-          <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="checkbook" size={28} color="#2196f3" />
-            <Title style={styles.cardTitle}>چک‌های در جریان</Title>
-          </View>
-          <Paragraph style={styles.amount}>{formatCurrency(Math.abs(summary.totalPendingChecks))}</Paragraph>
-        </Card.Content>
-      </Card>
+      <AnimatedCard index={9} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="checkbook" size={28} color="#2196f3" />
+              <Title style={styles.cardTitle}>چک‌های در جریان</Title>
+            </View>
+            <Paragraph style={styles.amount}><AnimatedNumber value={Math.abs(summary.totalPendingChecks)} /></Paragraph>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
 
+      <AnimatedCard index={10} style={{ marginBottom: 12 }}>
+        <Card style={styles.card}>
+          <Card.Content>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="calendar-clock" size={28} color="#ff9800" />
+              <Title style={styles.cardTitle}>اقساط</Title>
+            </View>
+            <Paragraph style={styles.amount}><AnimatedNumber value={thisMonthInst.total} /></Paragraph>
+            <Paragraph style={{ textAlign: 'right', color: '#666', marginTop: 4 }}>برای ماه جاری (جلالی): <AnimatedNumber value={thisMonthInst.total} /> • تعداد: {thisMonthInst.count}</Paragraph>
+            <Paragraph style={{ textAlign: 'right', color: '#777', marginTop: 6 }}>مجموع اقساط آینده: <AnimatedNumber value={summary.totalUpcomingInstallments} /></Paragraph>
+          </Card.Content>
+        </Card>
+      </AnimatedCard>
+
+      
+
+      {/* جزئیات اقساط این ماه */}
       <Card style={styles.card}>
         <Card.Content>
           <View style={styles.cardHeader}>
-            <MaterialCommunityIcons name="calendar-clock" size={28} color="#ff9800" />
-            <Title style={styles.cardTitle}>اقساط باقیمانده</Title>
+            <MaterialCommunityIcons name="calendar-month-outline" size={28} color="#ffa726" />
+            <Title style={styles.cardTitle}>جزئیات اقساط این ماه</Title>
           </View>
-          <Paragraph style={styles.amount}>{formatCurrency(summary.totalUpcomingInstallments)}</Paragraph>
+          {thisMonthList.length === 0 ? (
+            <Paragraph style={{ textAlign: 'right', color: '#777' }}>برای این ماه قسطی باقی نمانده.</Paragraph>
+          ) : (
+            thisMonthList.map(item => (
+              <List.Item
+                key={`${item.installmentId}-${item.monthIndex}`}
+                title={`${item.title}`}
+                description={`سررسید: ${formatPersianDate(item.dueDate)} • مبلغ: ${formatCurrency(item.amount)}`}
+                right={() => (
+                  <Checkbox
+                    status={item.isPaid ? 'checked' : 'unchecked'}
+                    onPress={() => togglePaymentQuick(item.installmentId, item.monthIndex, !item.isPaid)}
+                  />
+                )}
+              />
+            ))
+          )}
         </Card.Content>
       </Card>
 

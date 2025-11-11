@@ -1,4 +1,4 @@
-cd /d "c:\Users\hadi\New folder (2)\FinanceApp\android"
+الاcd /d "c:\Users\hadi\New folder (2)\FinanceApp\android"
 gradlew.bat assembleRelease# 📱 راهنمای ساخت و نصب برنامه مدیریت مالی
 
 ## روش ساده و سریع (پیشنهادی) ⭐

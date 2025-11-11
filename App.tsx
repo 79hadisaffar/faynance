@@ -28,7 +28,7 @@ function AppInner() {
         
         setIsReady(true);
       } catch (error) {
-        console.error('Initialization error:', error);
+        console.error('خطا در راه‌اندازی برنامه:', error);
         setIsReady(true); // حتی با خطا ادامه بده
       }
     }

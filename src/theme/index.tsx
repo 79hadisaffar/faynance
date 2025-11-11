@@ -72,7 +72,8 @@ export function usePaperTheme() {
   const { themeKey, fontFamily, fontScale, colorScheme } = useSettings();
   const base = themeKey === 'dark' ? PaperDarkTheme : PaperLightTheme;
   const applyFonts = (t: any) => {
-    const fam = fontFamily || (themeKey === 'dark' ? undefined : undefined);
+    // اگر فونت مشخص نشده، از Vazirmatn به‌عنوان پیشنهاد فارسی استفاده کن
+    const fam = fontFamily || 'Vazirmatn';
     const scale = Math.max(0.8, Math.min(1.6, fontScale));
     const patch = (s: any) => ({ ...s, fontFamily: fam, fontSize: Math.round((s?.fontSize || 14) * scale) });
     return {
@@ -115,8 +116,10 @@ export function ThemeProvider({ children }: ProviderProps) {
   const [visibleTabs, setVisibleTabsState] = useState<VisibleTabs>(defaultVisibleTabs);
   const [colors] = useState<SectionColors>(defaultSectionColors);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [fontFamily, setFontFamily] = useState<string>('');
-  const [fontScale, setFontScale] = useState<number>(1);
+  // پیش‌فرض فونت فارسی (اگر فونت باندل نشده باشد، سیستم به فونت پیش‌فرض بازمی‌گردد)
+  const [fontFamily, setFontFamily] = useState<string>('Vazirmatn');
+  // کمی بزرگ‌تر برای خوانایی بهتر متون فارسی
+  const [fontScale, setFontScale] = useState<number>(1.05);
   const [colorScheme, setColorScheme] = useState<'purple' | 'teal' | 'blue' | 'orange' | 'red'>('purple');
   const STORAGE_KEY = '@financeapp_settings_v1';
 

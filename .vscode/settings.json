@@ -1,0 +1,12 @@
+{
+  "files.autoSave": "off",
+  "files.autoSaveDelay": 1000,
+  "editor.formatOnSave": false,
+  "editor.formatOnType": false,
+  "editor.codeActionsOnSave": {},
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true
+  }
+}

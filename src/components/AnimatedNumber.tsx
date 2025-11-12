@@ -1,30 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated } from 'react-native';
-import { formatCurrency } from '../utils/helpers';
+import { Animated, Text, TextStyle, StyleProp } from 'react-native';
 
 type Props = {
-  value: number;
-  duration?: number;
-  style?: any;
+	value: number;
+	duration?: number;
+	style?: StyleProp<TextStyle>;
 };
 
 export default function AnimatedNumber({ value, duration = 700, style }: Props) {
-  const anim = useRef(new Animated.Value(0)).current;
-  const [display, setDisplay] = useState<number>(0);
+	const anim = useRef(new Animated.Value(value)).current;
+	const [display, setDisplay] = useState<number>(value);
 
-  useEffect(() => {
-    const id = anim.addListener(({ value: v }) => {
-      setDisplay(Math.round(v));
-    });
-    Animated.timing(anim, {
-      toValue: value,
-      duration,
-      useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(id);
-  }, [value, duration, anim]);
+	useEffect(() => {
+		const id = anim.addListener(({ value: v }) => {
+			setDisplay(Math.round(v));
+		});
+		Animated.timing(anim, {
+			toValue: value,
+			duration,
+			useNativeDriver: false,
+		}).start(() => {
+			anim.removeListener(id);
+			setDisplay(value);
+		});
+		return () => {
+			try {
+				anim.removeListener(id);
+			} catch {}
+		};
+	}, [value]);
 
-  return <>{/* render formatted currency */}
-    <>{formatCurrency(display)}</>
-  </>;
+	// Render as localized number (fa-IR if available)
+	const text = typeof display === 'number' ? display.toLocaleString('fa-IR') : String(display);
+
+	return <Text style={style}>{text}</Text>;
 }

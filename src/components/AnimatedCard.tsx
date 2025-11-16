@@ -31,4 +31,3 @@ export default function AnimatedCard({ index = 0, style, children }: Props) {
 		</Animated.View>
 	);
 }
-

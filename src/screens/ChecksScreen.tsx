@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState, BackHandler } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -40,10 +40,10 @@ export default function ChecksScreen() {
       if (state !== 'active' && visible) {
         const valid = !!(currentCheck.checkNumber && currentCheck.bankName && (currentCheck.amount || 0) > 0);
         if (valid) {
-          saveCheck();
-        } else {
-          setVisible(false);
+          // silent autosave when app backgrounds
+          saveCheck({ silent: true });
         }
+        // otherwise keep modal open
       }
     });
     return () => sub.remove();
@@ -56,14 +56,24 @@ export default function ChecksScreen() {
         if (visible) {
           const valid = !!(currentCheck.checkNumber && currentCheck.bankName && (currentCheck.amount || 0) > 0);
           if (valid) {
-            saveCheck();
-          } else {
-            setVisible(false);
+            saveCheck({ silent: true });
           }
+          // otherwise keep modal open
         }
       };
     }, [visible, currentCheck])
   );
+
+  // Prevent hardware back button from closing modal unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (visible) return true;
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [visible]);
 
   const loadChecks = async () => {
     const data = await DatabaseService.getChecks();
@@ -101,7 +111,7 @@ export default function ChecksScreen() {
     }
   };
 
-  const saveCheck = async () => {
+  const saveCheck = async (opts?: { silent?: boolean }) => {
     if (!currentCheck.checkNumber || !currentCheck.amount || !currentCheck.bankName) return;
     setSaving(true);
     try {
@@ -115,7 +125,7 @@ export default function ChecksScreen() {
           );
         }
       }
-      hideModal();
+      if (!opts?.silent) hideModal();
       await loadChecks();
     } finally {
       setSaving(false);
@@ -247,8 +257,8 @@ export default function ChecksScreen() {
       />)}
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
-      <Portal>
-  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
+    <Portal>
+  <Modal visible={visible} dismissable={false} onDismiss={() => {}} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش چک' : 'ثبت چک'}</Title>
           <TextInput label="شماره چک" value={currentCheck.checkNumber} onChangeText={(t)=>setCurrentCheck({...currentCheck, checkNumber:t})} style={styles.input} />
           <AmountInput label="مبلغ" value={currentCheck.amount || 0} onChange={(v)=> setCurrentCheck({ ...currentCheck, amount: v })} style={styles.input} />
@@ -277,7 +287,7 @@ export default function ChecksScreen() {
           }} style={styles.input} />
           <View style={styles.modalButtons}>
             <Button onPress={hideModal} disabled={saving}>انصراف</Button>
-            <Button mode="contained" onPress={saveCheck} loading={saving} disabled={saving}>ذخیره</Button>
+            <Button mode="contained" onPress={() => saveCheck()} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>

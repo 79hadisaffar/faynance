@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { FlatList, View, AppState } from 'react-native';
+import { FlatList, View, AppState, Platform, BackHandler } from 'react-native';
 import { Appbar, Button, Card, Dialog, List, Portal, Text, TextInput, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
 import { Account } from '../models/types';
@@ -51,7 +51,7 @@ export default function AccountsScreen() {
   const [snack, setSnack] = useState<{ visible: boolean; message: string; undo?: () => void }>({ visible: false, message: '' });
   const pendingDeletes = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
-  const saveEdit = async () => {
+  const saveEdit = async (opts?: { silent?: boolean }) => {
     if (!edit) return;
     if (!edit.title || !edit.title.trim()) {
       // جلوگیری از ذخیره نام خالی
@@ -65,7 +65,7 @@ export default function AccountsScreen() {
       } else {
         await (DatabaseService as any).addAccount?.({ title: edit.title || '', bankName: edit.bankName || '', cardLast4: edit.cardLast4 || '', balance: edit.balance || 0, createdAt: edit.createdAt || now, updatedAt: now });
       }
-      setEdit(null);
+  if (!opts?.silent) setEdit(null);
       await load();
     } finally {
       setSaving(false);
@@ -99,10 +99,10 @@ export default function AccountsScreen() {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' && edit) {
         if ((edit.title || '').trim()) {
-          saveEdit();
-        } else {
-          setEdit(null);
+          // silent autosave when app backgrounds
+          saveEdit({ silent: true });
         }
+        // otherwise keep the editor open so the user can finish
       }
     });
     return () => sub.remove();
@@ -114,14 +114,25 @@ export default function AccountsScreen() {
       return () => {
         if (edit) {
           if ((edit.title || '').trim()) {
-            saveEdit();
-          } else {
-            setEdit(null);
+            // silent autosave when leaving the tab/screen
+            saveEdit({ silent: true });
           }
+          // otherwise keep the editor open
         }
       };
     }, [edit])
   );
+
+  // Prevent hardware back button from closing the edit dialog unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (edit) return true; // consume back while editing
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [edit]);
 
   const renderItem = ({ item }: { item: Account }) => (
     <Card style={{ margin: 12 }} onPress={() => setEdit(item)}>
@@ -165,7 +176,7 @@ export default function AccountsScreen() {
             <Button mode="contained" disabled={parsed.length === 0} onPress={applyParsed}>اعمال</Button>
           </Dialog.Actions>
         </Dialog>
-  <Dialog visible={!!edit} onDismiss={async () => { if (edit && (edit.title || '').trim()) { await saveEdit(); } else { setEdit(null); } }}>
+  <Dialog visible={!!edit} onDismiss={() => { /* no-op: use explicit buttons to close */ }}>
           <Dialog.Title>ویرایش حساب</Dialog.Title>
           {edit && (
             <Dialog.Content>
@@ -178,7 +189,7 @@ export default function AccountsScreen() {
           <Dialog.Actions>
             <Button onPress={() => setEdit(null)}>انصراف</Button>
             {edit?.id ? <Button textColor="#f44336" onPress={removeAccount}>حذف</Button> : null}
-            <Button mode="contained" onPress={saveEdit} loading={saving} disabled={saving}>ذخیره</Button>
+            <Button mode="contained" onPress={() => saveEdit()} loading={saving} disabled={saving}>ذخیره</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>

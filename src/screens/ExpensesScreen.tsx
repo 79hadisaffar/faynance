@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { BackHandler } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, SectionList, Pressable, StyleSheet, Alert, RefreshControl, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -46,10 +47,10 @@ export default function ExpensesScreen() {
       if (state !== 'active' && visible) {
         const valid = !!((current.title || '').trim() && (current.amount || 0) > 0);
         if (valid) {
+          // silent autosave but don't close the modal automatically
           save({ silent: true });
-        } else {
-          setVisible(false);
         }
+        // otherwise keep the modal open so the user can finish editing
       }
     });
     return () => sub.remove();
@@ -62,14 +63,25 @@ export default function ExpensesScreen() {
         if (visible) {
           const valid = !!((current.title || '').trim() && (current.amount || 0) > 0);
           if (valid) {
+            // silent autosave when leaving the screen
             save({ silent: true });
-          } else {
-            setVisible(false);
           }
+          // otherwise leave the modal open for the user
         }
       };
     }, [visible, current])
   );
+
+  // Prevent hardware back button from closing the modal unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (visible || datePickerOpen) return true; // consume back when modal or datepicker open
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [visible, datePickerOpen]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -227,8 +239,8 @@ export default function ExpensesScreen() {
         stickySectionHeadersEnabled
       />)}
 
-      <Portal>
-  <Modal visible={visible} onDismiss={async ()=>{ if ((current.title||'').trim() && (current.amount||0)>0) { await save({ silent: true }); } else { setVisible(false); } }} contentContainerStyle={styles.modal}>
+    <Portal>
+  <Modal visible={visible} dismissable={false} onDismiss={() => {}} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش مخارج' : 'ثبت مخارج'}</Title>
           <TextInput label="عنوان" value={current.title} onChangeText={(t)=>setCurrent({...current, title:t})} style={styles.input} />
           <AmountInput label="مبلغ" value={current.amount || 0} onChange={(v)=> setCurrent({ ...current, amount: v })} style={styles.input} />

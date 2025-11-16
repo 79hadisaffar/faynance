@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState, BackHandler } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -42,10 +42,10 @@ export default function CreditsScreen() {
       if (state !== 'active' && visible) {
         const valid = !!(currentCredit.personName && (currentCredit.amount || 0) > 0);
         if (valid) {
-          saveCredit();
-        } else {
-          setVisible(false);
+          // silent autosave when app goes background
+          saveCredit({ silent: true });
         }
+        // otherwise keep modal open so user can continue
       }
     });
     return () => sub.remove();
@@ -58,14 +58,24 @@ export default function CreditsScreen() {
         if (visible) {
           const valid = !!(currentCredit.personName && (currentCredit.amount || 0) > 0);
           if (valid) {
-            saveCredit();
-          } else {
-            setVisible(false);
+            saveCredit({ silent: true });
           }
+          // otherwise keep modal open
         }
       };
     }, [visible, currentCredit])
   );
+
+  // Prevent hardware back button from closing modal unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (visible) return true;
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [visible]);
 
   const loadCredits = async () => {
     const data = await DatabaseService.getCredits();
@@ -143,7 +153,7 @@ export default function CreditsScreen() {
     }
   };
 
-  const saveCredit = async () => {
+  const saveCredit = async (opts?: { silent?: boolean }) => {
     if (!currentCredit.personName || !currentCredit.amount) return;
     setSaving(true);
     try {
@@ -157,7 +167,7 @@ export default function CreditsScreen() {
           );
         }
       }
-      hideModal();
+      if (!opts?.silent) hideModal();
       await loadCredits();
     } finally {
       setSaving(false);
@@ -286,8 +296,8 @@ export default function CreditsScreen() {
       />)}
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
-      <Portal>
-  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
+    <Portal>
+  <Modal visible={visible} dismissable={false} onDismiss={() => {}} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش طلب' : 'ثبت طلب'}</Title>
           <TextInput label="نام شخص" value={currentCredit.personName} onChangeText={(t)=>setCurrentCredit({...currentCredit, personName:t})} style={styles.input} />
           <TextInput label="تلفن" value={currentCredit.phone} onChangeText={(t)=>setCurrentCredit({...currentCredit, phone:t})} style={styles.input} keyboardType="phone-pad" />
@@ -314,7 +324,7 @@ export default function CreditsScreen() {
           }} style={styles.input} />
           <View style={styles.modalButtons}>
             <Button onPress={hideModal} disabled={saving}>انصراف</Button>
-            <Button mode="contained" onPress={saveCredit} loading={saving} disabled={saving}>ذخیره</Button>
+            <Button mode="contained" onPress={() => saveCredit()} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>

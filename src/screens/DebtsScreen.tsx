@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState } from 'react-native';
+import { View, SectionList, Pressable, StyleSheet, RefreshControl, Alert, LayoutAnimation, Platform, UIManager, AppState, BackHandler } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, List, Switch, Snackbar } from 'react-native-paper';
 import DatabaseService from '../services/database';
@@ -42,10 +42,10 @@ export default function DebtsScreen() {
       if (state !== 'active' && visible) {
         const valid = !!(currentDebt.personName && (currentDebt.amount || 0) > 0);
         if (valid) {
-          saveDebt();
-        } else {
-          setVisible(false);
+          // silent autosave when app backgrounds
+          saveDebt({ silent: true });
         }
+        // otherwise keep the modal open for the user
       }
     });
     return () => sub.remove();
@@ -58,14 +58,25 @@ export default function DebtsScreen() {
         if (visible) {
           const valid = !!(currentDebt.personName && (currentDebt.amount || 0) > 0);
           if (valid) {
-            saveDebt();
-          } else {
-            setVisible(false);
+            // silent autosave when leaving the screen
+            saveDebt({ silent: true });
           }
+          // otherwise keep modal open
         }
       };
     }, [visible, currentDebt])
   );
+
+  // Prevent hardware back button from closing modal unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (visible) return true;
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [visible]);
 
   const loadDebts = async () => {
     const data = await DatabaseService.getDebts();
@@ -144,7 +155,7 @@ export default function DebtsScreen() {
     }
   };
 
-  const saveDebt = async () => {
+  const saveDebt = async (opts?: { silent?: boolean }) => {
     if (!currentDebt.personName || !currentDebt.amount) return;
     setSaving(true);
     try {
@@ -158,7 +169,8 @@ export default function DebtsScreen() {
           );
         }
       }
-      hideModal();
+      // only hide modal for explicit saves
+      if (!opts?.silent) hideModal();
       await loadDebts();
     } finally {
       setSaving(false);
@@ -290,8 +302,8 @@ export default function DebtsScreen() {
       />)}
       <FAB style={styles.fab} icon="plus" onPress={() => showModal()} />
 
-      <Portal>
-  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
+    <Portal>
+  <Modal visible={visible} dismissable={false} onDismiss={() => {}} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش بدهی' : 'ثبت بدهی'}</Title>
           <TextInput label="نام شخص" value={currentDebt.personName} onChangeText={(t)=>setCurrentDebt({...currentDebt, personName:t})} style={styles.input} />
           <TextInput label="تلفن" value={currentDebt.phone} onChangeText={(t)=>setCurrentDebt({...currentDebt, phone:t})} style={styles.input} keyboardType="phone-pad" />
@@ -324,7 +336,7 @@ export default function DebtsScreen() {
           }} style={styles.input} />
           <View style={styles.modalButtons}>
             <Button onPress={hideModal} disabled={saving}>انصراف</Button>
-            <Button mode="contained" onPress={saveDebt} loading={saving} disabled={saving}>ذخیره</Button>
+            <Button mode="contained" onPress={() => saveDebt()} loading={saving} disabled={saving}>ذخیره</Button>
           </View>
         </Modal>
       </Portal>

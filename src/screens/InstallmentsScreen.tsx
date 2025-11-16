@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { BackHandler, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { View, FlatList, StyleSheet, Alert, RefreshControl, AppState } from 'react-native';
 import { FAB, Card, Title, Paragraph, Chip, IconButton, Portal, Modal, TextInput, Button, Checkbox, List, Snackbar } from 'react-native-paper';
@@ -34,32 +35,46 @@ export default function InstallmentsScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' && visible) {
+        // فقط ذخیرهٔ خودکار انجام می‌شود؛ مودال بسته نشود تا کاربر بتواند ادامه دهد.
         const title = (currentInstallment.title || '').trim();
         const count = currentInstallment.installmentCount || 0;
         const monthly = currentInstallment.installmentAmount || 0;
         if (title && monthly > 0 && count > 0) {
-          saveInstallment({ silent: true });
-        } else {
-          setVisible(false);
+          // silent save but DO NOT close the modal automatically
+          saveInstallment({ silent: true }).catch(() => {});
         }
+        // otherwise keep the modal open for the user to finish
       }
     });
     return () => sub.remove();
   }, [visible, currentInstallment]);
+
+  // Prevent hardware back button from closing modal unintentionally
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const onBack = () => {
+      if (visible || paymentsVisible) {
+        // Consume the back event while a modal is open
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [visible, paymentsVisible]);
 
   // ذخیرهٔ خودکار در تعویض تب/خروج از صفحه
   useFocusEffect(
     React.useCallback(() => {
       return () => {
         if (visible) {
+          // When leaving the screen, perform a silent save if data is valid,
+          // but do NOT close the modal — user must explicitly Save or Cancel.
           const title = (currentInstallment.title || '').trim();
           const count = currentInstallment.installmentCount || 0;
           const monthly = currentInstallment.installmentAmount || 0;
           if (title && monthly > 0 && count > 0) {
-            // silent save
-            saveInstallment({ silent: true });
-          } else {
-            setVisible(false);
+            saveInstallment({ silent: true }).catch(() => {});
           }
         }
       };
@@ -188,8 +203,14 @@ export default function InstallmentsScreen() {
           );
         }
       }
-      hideModal();
+      // only hide modal if this was an explicit save (not a silent/autosave)
+      if (!opts?.silent) hideModal();
       await loadInstallments();
+      if (opts?.silent) {
+        // show a brief snack to indicate autosave completed
+        setSnack({ visible: true, message: 'ذخیره شد' });
+        setTimeout(() => setSnack({ visible: false, message: '' }), 2000);
+      }
     } catch (error: any) {
       console.error('خطا در ذخیره اقساط:', error);
       if (!opts?.silent) Alert.alert('خطا در ذخیره', error?.message ? String(error.message) : String(error));
@@ -279,8 +300,8 @@ export default function InstallmentsScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
       
-      <Portal>
-  <Modal visible={visible} onDismiss={handleDismiss} contentContainerStyle={styles.modal}>
+        <Portal>
+      <Modal visible={visible} dismissable={false} onDismiss={() => { /* no-op: modal must be closed via buttons */ }} contentContainerStyle={styles.modal}>
           <Title>{editMode ? 'ویرایش قسط' : 'افزودن قسط'}</Title>
           <TextInput
             label="عنوان"
@@ -376,7 +397,7 @@ export default function InstallmentsScreen() {
 
       {/* Payments Modal */}
       <Portal>
-        <Modal visible={paymentsVisible} onDismiss={closePayments} contentContainerStyle={styles.modal}>
+        <Modal visible={paymentsVisible} dismissable={false} onDismiss={() => {}} contentContainerStyle={styles.modal}>
           <Title>پرداخت‌های ماهانه</Title>
           <FlatList
             data={payments}
